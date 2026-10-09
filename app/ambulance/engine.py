@@ -233,7 +233,7 @@ def simulate_run(
                 dist_ahead = sig_pos - position_m
                 if 0 < dist_ahead <= trigger_distance_m:
                     eta = dist_ahead / max(speed, 0.1)
-                    signal_controller.request_priority(sig_id, rs["approach"], eta)
+                    signal_controller.request_priority(sig_id, "NS", eta)
 
         # Check if at a red signal
         at_red = False
@@ -246,7 +246,7 @@ def simulate_run(
 
             if dist_to_signal <= 2.0 and dist_to_signal > -5.0:
                 # At the signal
-                colour = signal_controller.get_colour(sig_id, rs["approach"])
+                colour = signal_controller.get_colour(sig_id, "NS")
                 if mode == "baseline" and colour.value != "green":
                     at_red = True
                     if waiting_at != sig_id:
@@ -306,12 +306,22 @@ def simulate_run(
         else:
             lat, lon = route_waypoints[-1]
 
+        signals_state = {}
+        priority_state = {}
+        for sig_id in signal_controller._signals:
+            key = f"S{4 - sig_id}"
+            st = signal_controller.get_state(sig_id)
+            signals_state[key] = st["ns_colour"]
+            priority_state[key] = st["preempt_active"] and st["preempt_approach"] == "NS"
+
         pos_entry = {
             "lat": round(lat, 6),
             "lon": round(lon, 6),
             "speed_kmh": round(speed * 3.6, 1),
             "t": round(sim_t, 1),
             "route_distance_m": position_m,
+            "signals": signals_state,
+            "priority_active": priority_state,
         }
         positions.append(pos_entry)
 

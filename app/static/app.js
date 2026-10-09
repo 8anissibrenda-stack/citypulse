@@ -14,6 +14,17 @@ const driverSub = document.getElementById('display-sub');
 const liveAlerts = document.getElementById('live-alerts');
 
 // Tokens
+// Add sigColor helper
+function sigColor(state) {
+    if (!state) return '#EB3C3C'; // default red
+    const s = String(state).toLowerCase();
+    if (['green', 'g', 'green_ns', 'ns_green'].includes(s)) return '#5AC850';
+    if (['yellow', 'amber', 'y'].includes(s)) return '#FAAA28';
+    if (['red', 'all_red', 'r'].includes(s)) return '#EB3C3C';
+    return '#EB3C3C'; // default
+}
+
+// Tokens
 const TOKENS = {
     grass: '#243426', sidewalk: '#3C423E', road: '#3E3E40',
     zone: '#28C8DC', zoneBg: 'rgba(40, 200, 220, 0.12)',
@@ -93,6 +104,8 @@ function connectWebSocket() {
                 drawScene(msg);
             }
             updateUI(msg);
+        } else if (msg.type === 'signal_update') {
+            console.log('WS signal_update:', msg);
         }
     };
 }
@@ -324,8 +337,9 @@ function updateAmbulancePanel(prefix, timeline, elapsedSim) {
         document.getElementById(`amb-${prefix}`).setAttribute('transform', `translate(294, ${y})`);
         
         [1,2,3].forEach(i => {
-            const state = frame.signals[`S${i}`] || 'green';
-            document.getElementById(`${prefix}-s${i}`).setAttribute('fill', state === 'red' ? TOKENS.red : TOKENS.green);
+            const state = frame.signals[`S${i}`];
+            console.log(`[Timeline] Signal S${i} state:`, state);
+            document.getElementById(`${prefix}-s${i}`).setAttribute('fill', sigColor(state));
             
             if (prefix === 'prio') {
                 const isPrio = frame.priority_active[`S${i}`];
@@ -401,6 +415,8 @@ function updateAmbulanceChart(summary) {
 
 // Analytics Tab
 function fetchAnalytics() {
+    fetch('/api/signals').then(r => r.json()).then(data => console.log('/api/signals:', data));
+    
     fetch('/api/hotspots')
         .then(r => r.json())
         .then(data => {

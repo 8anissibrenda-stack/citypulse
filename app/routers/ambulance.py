@@ -266,9 +266,9 @@ async def compare_both(request: Request) -> dict:
                 "t": t,
                 "clock_s": t,
                 "route_fraction": min(1.0, along / total_dist),
-                "signals": {"S1": "green", "S2": "green", "S3": "green"}, # Simplified for now
-                "priority_active": {"S1": False, "S2": False, "S3": False},
-                "stops": p.get("stops", 0), # Not in positions, we'll accumulate
+                "signals": p.get("signals", {}),
+                "priority_active": p.get("priority_active", {}),
+                "stops": p.get("stops", 0),
                 "wait_s": p.get("wait_s", 0)
             })
             

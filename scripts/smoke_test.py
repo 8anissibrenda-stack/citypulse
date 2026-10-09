@@ -55,6 +55,31 @@ def check_ambulance():
     if base.get("stops", 0) < 2:
         logging.error("Baseline stops is less than 2")
         sys.exit(1)
+
+    t_base = data.get("baseline", [])
+    t_prio = data.get("priority", [])
+    
+    s2_red_amber = False
+    s3_red_amber = False
+    for frame in t_base:
+        s2 = frame.get("signals", {}).get("S2")
+        s3 = frame.get("signals", {}).get("S3")
+        if s2 in ["red", "yellow"]: s2_red_amber = True
+        if s3 in ["red", "yellow"]: s3_red_amber = True
+
+    if not s2_red_amber or not s3_red_amber:
+        logging.error("Baseline timeline missing red/amber state for S2 or S3")
+        sys.exit(1)
+
+    s2_prio = False
+    s3_prio = False
+    for frame in t_prio:
+        if frame.get("priority_active", {}).get("S2"): s2_prio = True
+        if frame.get("priority_active", {}).get("S3"): s3_prio = True
+
+    if not s2_prio or not s3_prio:
+        logging.error("Priority timeline missing priority_active for S2 or S3")
+        sys.exit(1)
         
     logging.info("Ambulance comparison verified")
 
