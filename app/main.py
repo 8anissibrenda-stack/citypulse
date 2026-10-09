@@ -139,6 +139,17 @@ async def lifespan(app: FastAPI):
     cam_id = int(db.query_one("SELECT value FROM system_settings WHERE key='active_camera_id'")["value"])
     mode = db.query_one("SELECT value FROM system_settings WHERE key='pipeline_mode'")["value"]
     
+    # Ensure sprites exist
+    sprite_dir = Path("app/assets/sprites")
+    if not sprite_dir.exists() or not any(sprite_dir.iterdir()):
+        import sys
+        sys.path.append(str(Path(__file__).parent.parent))
+        try:
+            from scripts.make_sprites import make_sprites
+            make_sprites()
+        except Exception as e:
+            logger.error("Failed to make sprites: %s", e)
+    
     # Initialize components
     event_loop = asyncio.get_running_loop()
     ws_manager = ConnectionManager()
@@ -149,6 +160,19 @@ async def lifespan(app: FastAPI):
     
     # Initialize pipeline
     def db_insert(**kwargs):
+        if kwargs.get("vru_track_id") is not None and kwargs.get("vehicle_track_id") is not None:
+            existing = db.query_one(
+                "SELECT id, severity FROM events WHERE vru_track_id = ? AND vehicle_track_id = ? AND camera_id = ? AND date(ts) = date('now')",
+                (kwargs["vru_track_id"], kwargs["vehicle_track_id"], kwargs["camera_id"])
+            )
+            if existing:
+                if kwargs["severity"] > existing["severity"]:
+                    db.execute(
+                        "UPDATE events SET severity = ?, event_type = ?, ttc_s = ?, min_distance_m = ? WHERE id = ?",
+                        (kwargs["severity"], kwargs["event_type"], kwargs["ttc_s"], kwargs["min_distance_m"], existing["id"])
+                    )
+                return
+        
         cols = ", ".join(kwargs.keys())
         placeholders = ", ".join("?" for _ in kwargs)
         db.execute(f"INSERT INTO events ({cols}) VALUES ({placeholders})", tuple(kwargs.values()))

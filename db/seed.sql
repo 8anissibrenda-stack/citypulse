@@ -76,7 +76,8 @@ INSERT INTO system_settings (key, value) VALUES
  ('store_snapshots','0'),
  ('blur_snapshots','1'),
  ('priority_trigger_distance_m','250'),
- ('ambulance_cruise_kmh','40');
+ ('ambulance_cruise_kmh','40'),
+ ('driver_compliance_pct', '0.85');
 
 INSERT INTO test_scenarios (id, code, name, description, scenario_type, expected_outcome, params_json) VALUES
  (1,'SC01','Approaching pedestrian','Pedestrian steps toward the crossing while a car approaches at moderate speed','road_safety','alert',

@@ -192,28 +192,94 @@ class PipelineService:
             if alerts:
                 self.active_alerts = alerts
                 self._last_alert_time = time.monotonic()
-            elif time.monotonic() - self._last_alert_time > 3.0:
-                # Auto-clear after 3 seconds
-                if self.active_alerts:
+            else:
+                clear_alert = False
+                if mode == "simulator" and simulator is not None and getattr(simulator, '_ped', None):
+                    if simulator._ped.y >= 520:
+                        clear_alert = True
+                elif time.monotonic() - self._last_alert_time > 3.0:
+                    clear_alert = True
+                    
+                if clear_alert and self.active_alerts:
                     self.active_alerts = []
                     self._broadcast("alert_clear", {"message": "All clear"})
 
+            if mode == "simulator" and simulator is not None:
+                simulator.set_active_alerts(self.active_alerts)
+
             # --- Render annotated frame ---
-            signal_states = self._signal_states_fn() if self._signal_states_fn else None
-            annotated = self._renderer.render(
-                frame, objects, self.active_alerts,
-                fps=self.fps, mode=self.mode,
-                active_alert_count=len(self.active_alerts),
-                signal_states=signal_states,
-            )
-            jpeg = self._renderer.encode_jpeg(annotated)
-            with self._frame_lock:
-                self._latest_frame = jpeg
+            if mode == "video":
+                signal_states = self._signal_states_fn() if self._signal_states_fn else None
+                annotated = self._renderer.render(
+                    frame, objects, self.active_alerts,
+                    fps=self.fps, mode=self.mode,
+                    active_alert_count=len(self.active_alerts),
+                    signal_states=signal_states,
+                )
+                jpeg = self._renderer.encode_jpeg(annotated)
+                with self._frame_lock:
+                    self._latest_frame = jpeg
+            else:
+                with self._frame_lock:
+                    self._latest_frame = None
 
             # --- Store events ---
             for alert in alerts:
                 self._store_event(alert)
-                self._broadcast("alert", self._alert_to_dict(alert))
+
+            # --- Broadcast frame ---
+            display = "clear"
+            if self.active_alerts:
+                display = "critical" if any(a.severity == 3 for a in self.active_alerts) else "warning"
+
+            stage = 1
+            if mode == "simulator" and simulator is not None:
+                t = simulator.current_time % 14.5
+                if t < 1.2:
+                    stage = 1
+                elif t < 1.7:
+                    stage = 2
+                elif self.active_alerts:
+                    stage = 3
+                elif getattr(simulator, '_car_braking', False):
+                    stage = 4
+                elif getattr(simulator, '_car', None) and simulator._car.vx <= 0.1:
+                    stage = 5
+                elif t > 6.0:
+                    stage = 6
+                    
+            record = False
+            if time.monotonic() - self._last_alert_time < 1.4:
+                record = True
+
+            conflict = None
+            if self.active_alerts:
+                a = self.active_alerts[0]
+                conflict = {"ttc": round(a.ttc_s, 1), "level": "critical" if a.severity == 3 else "warning"}
+
+            from app import db
+            try:
+                rows = db.query_all("SELECT event_type, ttc_s, vru_class, vehicle_class, zone_name FROM events WHERE is_seed=0 ORDER BY ts DESC LIMIT 3")
+                db_alerts = [{"level": r["event_type"], "ttc": round(r["ttc_s"], 1), "desc": f"{r['vru_class']} x {r['vehicle_class']} | {r['zone_name']}"} for r in rows]
+                m_row = db.query_one("SELECT COUNT(*) as c FROM events WHERE is_seed=0 AND date(ts) = date('now')")
+                f_row = db.query_one("SELECT COUNT(*) as c FROM scenario_results WHERE false_alert=1")
+                warnings_count = m_row["c"] if m_row else 0
+                false_alerts_count = f_row["c"] if f_row else 0
+            except Exception:
+                db_alerts = []
+                warnings_count = 0
+                false_alerts_count = 0
+
+            self._broadcast("frame", {
+                "t": getattr(simulator, '_loop_t', ts) if simulator else ts,
+                "objects": [{"id": o.track_id, "cls": o.label, "x": o.bbox[0] + (o.bbox[2]-o.bbox[0])/2, "y": o.bbox[1] + (o.bbox[3]-o.bbox[1])/2, "w": o.bbox[2]-o.bbox[0], "h": o.bbox[3]-o.bbox[1], "conf": o.conf} for o in objects],
+                "conflict": conflict,
+                "display": display,
+                "stage": stage,
+                "record": record,
+                "alerts": db_alerts,
+                "metrics": {"warnings": warnings_count, "response_ms": self.latency_ms, "false_alerts": false_alerts_count}
+            })
 
             # --- FPS ---
             frame_count += 1

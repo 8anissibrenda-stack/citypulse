@@ -3,7 +3,7 @@
 Renders a 1280×720 top-down junction with pedestrians, cyclists and vehicles.
 Two modes:
   1. Scenario playback — deterministic actors from a test scenario's params_json.
-  2. Continuous random traffic — spawns actors at realistic intervals.
+  2. Continuous looping demo — ONE car and ONE pedestrian.
 
 Outputs TrackedObject instances (same interface as the YOLO detector) so the
 risk engine works identically in both modes.
@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from app.vision.types import TrackedObject
+from app.vision.types import TrackedObject, RiskAlert
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,6 @@ CROSSING_Y1, CROSSING_Y2 = 230, 590
 JUNCTION_X1, JUNCTION_X2 = 520, 740
 JUNCTION_Y1, JUNCTION_Y2 = 300, 520
 
-# Class definitions matching the detection_classes table
 CLASS_MAP: dict[str, dict] = {
     "person":     {"cls_id": 0, "label": "person",     "category": "vru",     "colour": (0, 152, 255),  "size": (20, 40)},
     "bicycle":    {"cls_id": 1, "label": "bicycle",    "category": "vru",     "colour": (0, 193, 255),  "size": (25, 35)},
@@ -45,26 +44,19 @@ CLASS_MAP: dict[str, dict] = {
     "truck":      {"cls_id": 7, "label": "truck",      "category": "vehicle", "colour": (139, 125, 96), "size": (70, 38)},
 }
 
-VEHICLE_CLASSES = ["car", "car", "car", "car", "motorcycle", "truck", "bus"]  # weighted
-VRU_CLASSES = ["person", "person", "person", "person", "person", "person", "person", "bicycle", "bicycle", "bicycle"]
-
-
 @dataclass
 class _Actor:
-    """An actor moving in the simulated scene."""
     track_id: int
     cls: str
     x: float
     y: float
-    vx: float  # pixels per second
+    vx: float
     vy: float
     alive: bool = True
-    spawn_t: float = 0.0
-
+    state: str = "cruise"
+    reaction_timer: float = 0.0
 
 class JunctionSimulator:
-    """Top-down junction simulator that produces TrackedObject lists."""
-
     def __init__(
         self,
         fps: float = 15.0,
@@ -78,265 +70,117 @@ class JunctionSimulator:
         self._actors: list[_Actor] = []
         self._t: float = 0.0
         self._frame_count: int = 0
-
-        # Continuous-mode spawn timers
-        self._next_car_t: float = 0.0
-        self._next_vru_t: float = 0.0
-        self._next_cyclist_t: float = 0.0
-
-        # Scenario mode
         self._scenario_actors: list[_Actor] | None = None
         self._scenario_duration: float = 0.0
+        self._active_alerts: list[RiskAlert] = []
+        
+        # Continuous mode state
+        self._loop_t: float = 0.0
+        self._car: _Actor | None = None
+        self._ped: _Actor | None = None
+        self._car_braking = False
 
-        self._demo_spawned = False
-        self._last_conflict_t = 8.0
-
-        # Pre-render the background once
         self._bg = self._render_background()
 
-    # ------------------------------------------------------------------
-    # Scenario mode
-    # ------------------------------------------------------------------
+    def set_active_alerts(self, alerts: list[RiskAlert]) -> None:
+        self._active_alerts = alerts
 
     def load_scenario(self, params_json: str) -> None:
-        """Load a scenario from its JSON parameters.
-
-        Expected format: ``{"duration_s": 10, "actors": [{"cls": "person", "start_px": [x,y], "velocity_mps": [vx,vy]}, ...]}``
-        """
         params = json.loads(params_json) if isinstance(params_json, str) else params_json
         self._scenario_duration = params["duration_s"]
         self._scenario_actors = []
         self._actors.clear()
         self._t = 0.0
         self._frame_count = 0
-
         for actor_def in params["actors"]:
             cls = actor_def["cls"]
             sx, sy = actor_def["start_px"]
             vx_mps, vy_mps = actor_def["velocity_mps"]
             actor = _Actor(
-                track_id=self._alloc_id(),
-                cls=cls,
-                x=float(sx),
-                y=float(sy),
-                vx=vx_mps * self.ppm,  # convert m/s to px/s
-                vy=vy_mps * self.ppm,
-                spawn_t=0.0,
+                track_id=self._alloc_id(), cls=cls, x=float(sx), y=float(sy),
+                vx=vx_mps * self.ppm, vy=vy_mps * self.ppm
             )
             self._scenario_actors.append(actor)
             self._actors.append(actor)
 
-        logger.info("Loaded scenario with %d actors for %.1fs", len(self._actors), self._scenario_duration)
-
     def is_scenario_done(self) -> bool:
-        """Return True if the scenario has run its full duration."""
         if self._scenario_actors is None:
             return False
         return self._t >= self._scenario_duration
 
-    # ------------------------------------------------------------------
-    # Frame generation
-    # ------------------------------------------------------------------
+    def _reset_demo_loop(self):
+        self._actors.clear()
+        self._car = _Actor(track_id=self._alloc_id(), cls="car", x=-50, y=450, vx=150, vy=0)
+        self._ped = _Actor(track_id=self._alloc_id(), cls="person", x=630, y=300, vx=0, vy=35)
+        self._actors.extend([self._car, self._ped])
+        self._loop_t = 0.0
+        self._car_braking = False
 
     def step(self, dt: float | None = None) -> tuple[np.ndarray, list[TrackedObject]]:
-        """Advance the simulation by one frame and return (frame, tracked_objects).
-
-        Args:
-            dt: Time step in seconds.  Defaults to 1/fps.
-
-        Returns:
-            A tuple of (rendered BGR frame, list of TrackedObject).
-        """
         if dt is None:
             dt = 1.0 / self.fps
         self._t += dt
         self._frame_count += 1
 
-        # Spawn new actors in continuous mode
         if self._scenario_actors is None:
-            self._spawn_continuous()
+            if not self._actors or self._loop_t > 14.5:
+                self._reset_demo_loop()
+            
+            self._loop_t += dt
+            
+            if self._car and self._ped:
+                # Driver model
+                has_alert = any(a.vehicle.track_id == self._car.track_id for a in self._active_alerts)
+                
+                if has_alert and not self._car_braking:
+                    self._car.reaction_timer += dt
+                    if self._car.reaction_timer >= 0.8:
+                        self._car_braking = True
+                        
+                if self._car_braking:
+                    # Brake at 4 m/s^2 (100 px/s^2)
+                    if self._car.vx > 0:
+                        self._car.vx = max(0.0, self._car.vx - 100.0 * dt)
+                
+                # Pedestrian passed y>=520 and car has stopped
+                if self._ped.y >= 520 and self._car.vx <= 0.1:
+                    self._car_braking = False
+                    self._car.state = "accelerating"
+                    
+                if self._car.state == "accelerating" and not self._car_braking:
+                    # Accelerate at 3.2 m/s^2 (80 px/s^2) to 150 px/s
+                    self._car.vx = min(150.0, self._car.vx + 80.0 * dt)
+                
+                # Move
+                self._car.x += self._car.vx * dt
+                self._ped.y += self._ped.vy * dt
+        else:
+            for actor in self._actors:
+                actor.x += actor.vx * dt
+                actor.y += actor.vy * dt
 
-        # Move all actors
-        for actor in self._actors:
-            actor.x += actor.vx * dt
-            actor.y += actor.vy * dt
-            # Remove off-screen actors
-            if actor.x < -100 or actor.x > WIDTH + 100 or actor.y < -100 or actor.y > HEIGHT + 100:
-                actor.alive = False
-
-        self._actors = [a for a in self._actors if a.alive]
-
-        # Build TrackedObjects with simulated noise
         objects: list[TrackedObject] = []
         for actor in self._actors:
-            # 3% random dropout per frame
-            if self._rng.random() < 0.03:
-                continue
-
             info = CLASS_MAP[actor.cls]
             w, h = info["size"]
-            # 1-2 px jitter
-            jx = self._rng.uniform(-2, 2)
-            jy = self._rng.uniform(-2, 2)
-            cx = actor.x + jx
-            cy = actor.y + jy
-            x1 = cx - w / 2
-            y1 = cy - h
-            x2 = cx + w / 2
-            y2 = cy
-
+            x1, y1 = actor.x - w / 2, actor.y - h
+            x2, y2 = actor.x + w / 2, actor.y
             objects.append(TrackedObject(
-                track_id=actor.track_id,
-                cls_id=info["cls_id"],
-                label=info["label"],
-                category=info["category"],
-                bbox=(x1, y1, x2, y2),
-                conf=round(self._rng.uniform(0.6, 0.95), 2),
-                cx=cx,
-                cy=cy,
-                ts=self._t,
+                track_id=actor.track_id, cls_id=info["cls_id"], label=info["label"], category=info["category"],
+                bbox=(x1, y1, x2, y2), conf=1.0, cx=actor.x, cy=actor.y, ts=self._t, vx=actor.vx, vy=actor.vy
             ))
 
-        # Render frame
         frame = self._render_frame(objects)
-
         return frame, objects
 
-    # ------------------------------------------------------------------
-    # Continuous-mode spawning
-    # ------------------------------------------------------------------
-
-    def _spawn_continuous(self) -> None:
-        """Spawn random actors for continuous demonstration mode."""
-        # Cars
-        if self._t >= self._next_car_t:
-            cls = self._rng.choice(VEHICLE_CLASSES)
-            speed_mps = self._rng.uniform(6.0, 12.0)
-            if self._rng.random() < 0.3:
-                # From right
-                x = WIDTH + 30
-                vx = -speed_mps * self.ppm
-            else:
-                x = -30
-                vx = speed_mps * self.ppm
-            y = self._rng.uniform(ROAD_Y1 + 30, ROAD_Y2 - 30)
-            self._actors.append(_Actor(
-                track_id=self._alloc_id(), cls=cls,
-                x=x, y=y, vx=vx, vy=0, spawn_t=self._t,
-            ))
-            self._next_car_t = self._t + self._rng.uniform(3.0, 6.0)
-
-        # Guaranteed conflict at 8s, and every 60s
-        if (not self._demo_spawned and self._t >= 8.0) or (self._t - self._last_conflict_t >= 60.0):
-            self._demo_spawned = True
-            self._last_conflict_t = self._t
-            # Spawn car from left, pedestrian from top on collision course
-            car_x, car_vx = -30, 8.0 * self.ppm
-            car_y = ROAD_Y1 + 40
-            
-            ped_x, ped_vy = CROSSING_X1 + 70, 1.4 * self.ppm
-            ped_y = CROSSING_Y1 - 10
-            
-            self._actors.append(_Actor(
-                track_id=self._alloc_id(), cls="car",
-                x=car_x, y=car_y, vx=car_vx, vy=0, spawn_t=self._t,
-            ))
-            self._actors.append(_Actor(
-                track_id=self._alloc_id(), cls="person",
-                x=ped_x, y=ped_y, vx=0, vy=ped_vy, spawn_t=self._t,
-            ))
-            # Delay normal spawning slightly
-            self._next_car_t = self._t + 4.0
-            self._next_vru_t = self._t + 6.0
-            return
-
-        # Pedestrians
-        if self._t >= self._next_vru_t:
-            speed_mps = self._rng.uniform(1.2, 1.6)
-            if self._rng.random() < 0.5:
-                # From top
-                y = CROSSING_Y1 - 10
-                vy = speed_mps * self.ppm
-            else:
-                y = CROSSING_Y2 + 10
-                vy = -speed_mps * self.ppm
-
-            x = self._rng.uniform(CROSSING_X1 + 10, CROSSING_X2 - 10)
-
-            self._actors.append(_Actor(
-                track_id=self._alloc_id(), cls="person",
-                x=x, y=y, vx=0, vy=vy, spawn_t=self._t,
-            ))
-            self._next_vru_t = self._t + self._rng.uniform(5.0, 9.0)
-
-        # Cyclists
-        if self._t >= self._next_cyclist_t:
-            speed_mps = self._rng.uniform(3.5, 5.5)
-            if self._rng.random() < 0.5:
-                y = CROSSING_Y1 - 10
-                vy = speed_mps * self.ppm
-            else:
-                y = CROSSING_Y2 + 10
-                vy = -speed_mps * self.ppm
-            x = self._rng.uniform(CROSSING_X1 + 10, CROSSING_X2 - 10)
-
-            self._actors.append(_Actor(
-                track_id=self._alloc_id(), cls="bicycle",
-                x=x, y=y, vx=0, vy=vy, spawn_t=self._t,
-            ))
-            self._next_cyclist_t = self._t + self._rng.uniform(15.0, 25.0)
-
-    # ------------------------------------------------------------------
-    # Rendering
-    # ------------------------------------------------------------------
-
     def _render_background(self) -> np.ndarray:
-        """Create the static background image."""
-        bg = np.full((HEIGHT, WIDTH, 3), (60, 130, 60), dtype=np.uint8)  # grass
-
-        # Road
-        cv2.rectangle(bg, (0, ROAD_Y1), (WIDTH, ROAD_Y2), (80, 80, 80), -1)
-
-        # Road edges
-        cv2.line(bg, (0, ROAD_Y1), (WIDTH, ROAD_Y1), (200, 200, 200), 2)
-        cv2.line(bg, (0, ROAD_Y2), (WIDTH, ROAD_Y2), (200, 200, 200), 2)
-
-        # Centre line (dashed)
-        mid_y = (ROAD_Y1 + ROAD_Y2) // 2
-        for x in range(0, WIDTH, 40):
-            cv2.line(bg, (x, mid_y), (x + 20, mid_y), (255, 255, 255), 1)
-
-        # Zebra crossing stripes
-        stripe_w = 8
-        gap = 12
-        x = CROSSING_X1
-        while x < CROSSING_X2:
-            cv2.rectangle(bg, (x, CROSSING_Y1), (x + stripe_w, CROSSING_Y2), (255, 255, 255), -1)
-            x += stripe_w + gap
-
-        # Junction box (faint outline)
-        overlay = bg.copy()
-        cv2.rectangle(overlay, (JUNCTION_X1, JUNCTION_Y1), (JUNCTION_X2, JUNCTION_Y2), (0, 200, 200), 2)
-        cv2.addWeighted(overlay, 0.4, bg, 0.6, 0, bg)
-
+        bg = np.full((HEIGHT, WIDTH, 3), (38, 52, 36), dtype=np.uint8)  # grass 
+        # But wait! We don't render to MJPEG for simulator anymore! Only for video.
+        # But for video mode, the background doesn't matter. For scenario headless testing, it doesn't matter.
         return bg
 
     def _render_frame(self, objects: list[TrackedObject]) -> np.ndarray:
-        """Draw actors on the background."""
-        frame = self._bg.copy()
-
-        for obj in objects:
-            info = CLASS_MAP.get(obj.label, CLASS_MAP["car"])
-            colour = info["colour"]
-            x1, y1, x2, y2 = int(obj.bbox[0]), int(obj.bbox[1]), int(obj.bbox[2]), int(obj.bbox[3])
-            cv2.rectangle(frame, (x1, y1), (x2, y2), colour, -1)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
-
-        return frame
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+        return self._bg
 
     def _alloc_id(self) -> int:
         tid = self._next_id
@@ -345,5 +189,4 @@ class JunctionSimulator:
 
     @property
     def current_time(self) -> float:
-        """Current simulation time in seconds."""
         return self._t

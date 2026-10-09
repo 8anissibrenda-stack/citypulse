@@ -1,421 +1,387 @@
-// CityPulse Frontend Application Logic.
+// CityPulse Frontend Logic
+let ws = null;
+let currentMode = 'simulator';
+let isRunning = false;
+
+// DOM Elements
+const canvas = document.getElementById('scene-canvas');
+const ctx = canvas.getContext('2d');
+const videoFeed = document.getElementById('video-feed');
+const badge = document.getElementById('status-badge');
+const driverDisplay = document.getElementById('driver-display');
+const driverMain = document.getElementById('display-main');
+const driverSub = document.getElementById('display-sub');
+const liveAlerts = document.getElementById('live-alerts');
+
+// Tokens
+const TOKENS = {
+    grass: '#243426', sidewalk: '#3C423E', road: '#3E3E40',
+    zone: '#28C8DC', zoneBg: 'rgba(40, 200, 220, 0.12)',
+    car: '#2196F3', ped: '#FF9800', amber: '#FAAA28', red: '#EB3C3C',
+    chipOn: '#2878C8', chipOff: '#3A3E46'
+};
+
+const CAPTIONS = {
+    1: "1. Camera frames are captured, road users detected and tracked",
+    2: "2. Engine predicts the car and pedestrian paths - collision course found",
+    3: "3. TTC under 3 s for 3 frames -> warning sent to driver display",
+    4: "4. Driver brakes in time - car slows before the crossing",
+    5: "5. Pedestrian crosses safely while the car waits - event saved to the database",
+    6: "6. Crossing clear - traffic resumes, alert clears automatically"
+};
 
 // State
-let appState = {
-    pipelineRunning: false,
-    mode: 'simulator',
-    map: null,
-    ambMarker: null,
-    routeLayer: null,
-    signalMarkers: {},
-    chart: null
-};
+let lastFrameData = null;
 
-// Elements
-const els = {
-    modeSelect: document.getElementById('mode-select'),
-    btnStart: document.getElementById('btn-start'),
-    btnStop: document.getElementById('btn-stop'),
-    statusBadge: document.getElementById('pipeline-status'),
-    videoStream: document.getElementById('video-stream'),
-    videoPlaceholder: document.getElementById('video-placeholder'),
-    alertFeed: document.getElementById('alert-feed'),
-    hotspotsBody: document.getElementById('hotspots-body'),
-    scenarioList: document.getElementById('scenario-list'),
-    ambChart: document.getElementById('ambChart'),
-    btnSimBaseline: document.getElementById('btn-sim-baseline'),
-    btnSimPriority: document.getElementById('btn-sim-priority'),
-    btnCompare: document.getElementById('btn-compare'),
-    ambStatus: document.getElementById('amb-status'),
-    ambSaved: document.getElementById('amb-saved'),
-    btnSaveSettings: document.getElementById('btn-save-settings'),
-    valTtcWarn: document.getElementById('val-ttc-warn'),
-    valTtcCrit: document.getElementById('val-ttc-crit'),
-    setTtcWarn: document.getElementById('set-ttc-warn'),
-    setTtcCrit: document.getElementById('set-ttc-crit'),
-};
-
-// WebSocket
-let ws;
-function connectWS() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+function switchTab(tabId) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     
+    event.target.classList.add('active');
+    document.getElementById('tab-' + tabId).classList.add('active');
+    
+    if (tabId === 'analytics') {
+        fetchAnalytics();
+    }
+}
+
+function startPipeline() {
+    currentMode = document.getElementById('mode-select').value;
+    fetch(`/api/pipeline/start?mode=${currentMode}`, { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            isRunning = true;
+            badge.textContent = 'RUNNING';
+            badge.className = 'badge running';
+            if (currentMode === 'video') {
+                canvas.style.display = 'none';
+                videoFeed.style.display = 'block';
+                videoFeed.src = '/video_feed?' + new Date().getTime();
+            } else {
+                canvas.style.display = 'block';
+                videoFeed.style.display = 'none';
+                videoFeed.src = '';
+            }
+            connectWebSocket();
+        });
+}
+
+function stopPipeline() {
+    fetch('/api/pipeline/stop', { method: 'POST' })
+        .then(() => {
+            isRunning = false;
+            badge.textContent = 'STOPPED';
+            badge.className = 'badge stopped';
+            if (ws) ws.close();
+            videoFeed.src = '';
+        });
+}
+
+function replayScenario() {
+    stopPipeline();
+    setTimeout(startPipeline, 500);
+}
+
+function connectWebSocket() {
+    if (ws) ws.close();
+    ws = new WebSocket(`ws://${window.location.host}/ws`);
     ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
-        handleWSMessage(msg);
-    };
-    
-    ws.onclose = () => {
-        setTimeout(connectWS, 2000); // Reconnect
-    };
-}
-
-function handleWSMessage(msg) {
-    if (msg.type === 'alert') {
-        addAlert(msg);
-    } else if (msg.type === 'alert_clear') {
-        // Handled server-side usually, but could clear UI here
-    } else if (msg.type === 'signal_update') {
-        updateSignalOnMap(msg.state);
-    } else if (msg.type === 'ambulance_update') {
-        updateAmbulanceOnMap(msg);
-    }
-}
-
-function showError(msg) {
-    console.error(msg);
-    els.ambStatus.textContent = msg;
-    els.ambStatus.style.color = 'var(--color-critical)';
-}
-
-// UI Updaters
-function addAlert(alert) {
-    const feed = els.alertFeed;
-    const item = document.createElement('div');
-    item.className = `alert-item ${alert.event_type}`;
-    
-    const time = new Date().toLocaleTimeString();
-    
-    let title = "Warning";
-    if (alert.event_type === 'critical') title = "CRITICAL ALERT";
-    if (alert.event_type === 'near_miss') title = "Near Miss";
-    const demoLabel = alert.is_seed ? '<span class="demo-label">demo data</span>' : '';
-    
-    item.innerHTML = `
-        <div class="alert-header">
-            <span>${title}${demoLabel}</span>
-            <span>${time}</span>
-        </div>
-        <div class="alert-details">
-            TTC: ${alert.ttc_s}s | Dist: ${alert.min_distance_m}m<br>
-            ${alert.vru_class} vs ${alert.vehicle_class}
-            ${alert.zone_name ? `in ${alert.zone_name}` : ''}
-        </div>
-    `;
-    
-    feed.insertBefore(item, feed.firstChild);
-    
-    // Keep max 20 alerts
-    while (feed.children.length > 20) {
-        feed.removeChild(feed.lastChild);
-    }
-}
-
-// API Calls
-async function fetchState() {
-    try {
-        const res = await fetch('/api/state');
-        const data = await res.json();
-        
-        appState.pipelineRunning = data.pipeline.running;
-        appState.mode = data.pipeline.mode;
-        
-        els.modeSelect.value = appState.mode;
-        updatePipelineUI();
-        
-        // Init signals on map
-        data.signals.forEach(updateSignalOnMap);
-        
-    } catch (e) {
-        showError("Failed to fetch state");
-    }
-}
-
-async function fetchEvents() {
-    try {
-        const res = await fetch('/api/events');
-        const data = await res.json();
-        els.alertFeed.innerHTML = '';
-        data.reverse().forEach(addAlert);
-    } catch (e) {
-        showError("Failed to fetch events");
-    }
-}
-
-async function fetchMetrics() {
-    try {
-        const res = await fetch('/api/metrics');
-        const data = await res.json();
-        
-        document.getElementById('metric-warnings').textContent = data.warnings;
-        document.getElementById('metric-criticals').textContent = data.criticals;
-        document.getElementById('metric-nearmiss').textContent = data.near_misses;
-        document.getElementById('metric-latency').textContent = `${data.p95_latency_ms} ms`;
-        
-        // Update chart if comparison exists
-        if (data.ambulance_comparison && data.ambulance_comparison.length > 0) {
-            updateChart(data.ambulance_comparison);
+        if (msg.type === 'frame') {
+            lastFrameData = msg;
+            if (currentMode === 'simulator') {
+                drawScene(msg);
+            }
+            updateUI(msg);
         }
-    } catch (e) {
-        showError("Failed to fetch metrics");
-    }
+    };
 }
 
-async function fetchHotspots() {
-    try {
-        const res = await fetch('/api/hotspots');
-        const data = await res.json();
-        
-        els.hotspotsBody.innerHTML = '';
-        data.forEach(h => {
-            const demoLabel = h.is_seed ? '<span class="demo-label">demo data</span>' : '';
-            els.hotspotsBody.innerHTML += `
-                <tr>
-                    <td>${h.zone_name}${demoLabel}</td>
-                    <td>${h.n_events}</td>
-                    <td>${h.avg_ttc_s}s</td>
-                </tr>
-            `;
-        });
-    } catch (e) {
-        showError("Failed to fetch hotspots");
-    }
-}
+function drawScene(data) {
+    ctx.save();
+    ctx.clearRect(0, 0, 930, 674);
+    ctx.translate(0, -46);
 
-async function fetchScenarios() {
-    try {
-        const [scenRes, resultsRes] = await Promise.all([
-            fetch('/api/scenarios'),
-            fetch('/api/scenarios/results')
-        ]);
-        
-        const scenarios = await scenRes.json();
-        const results = await resultsRes.json();
-        
-        // Get latest result per scenario
-        const latestResults = {};
-        results.forEach(r => {
-            if (!latestResults[r.scenario_id]) {
-                latestResults[r.scenario_id] = r;
-            }
-        });
-        
-        els.scenarioList.innerHTML = '';
-        scenarios.forEach(s => {
-            const r = latestResults[s.id];
-            let statusBadge = '<span class="status-badge status-pending">Not Run</span>';
-            if (r) {
-                statusBadge = r.passed 
-                    ? '<span class="status-badge status-pass">PASS</span>'
-                    : '<span class="status-badge status-fail">FAIL</span>';
-            }
+    // Grass is canvas bg.
+    // Sidewalks
+    ctx.fillStyle = TOKENS.sidewalk;
+    ctx.fillRect(0, 0, 930, 330);
+    ctx.fillRect(0, 490, 930, 720); // 720 is beyond 674+46
+
+    // Road
+    ctx.fillStyle = TOKENS.road;
+    ctx.fillRect(0, 330, 930, 160);
+
+    // Dashed center line
+    ctx.strokeStyle = '#FFF';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([20, 20]);
+    ctx.beginPath();
+    ctx.moveTo(0, 410);
+    ctx.lineTo(930, 410);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Zebra crossing
+    ctx.fillStyle = '#FFF';
+    for (let y = 336; y <= 490 - 12; y += 24) {
+        ctx.fillRect(560, y, 140, 12);
+    }
+
+    // Conflict zone
+    ctx.fillStyle = TOKENS.zoneBg;
+    ctx.strokeStyle = TOKENS.zone;
+    ctx.lineWidth = 1;
+    ctx.fillRect(560, 230, 140, 360);
+    ctx.strokeRect(560, 230, 140, 360);
+    ctx.fillStyle = TOKENS.zone;
+    ctx.font = '11px sans-serif';
+    ctx.fillText('Zebra crossing (conflict zone)', 560, 225);
+
+    // Objects
+    let carObj = null;
+    let pedObj = null;
+
+    data.objects.forEach(o => {
+        if (o.cls === 'car') {
+            carObj = o;
+            ctx.fillStyle = TOKENS.car;
+            // Draw rounded rect 70x34
+            ctx.beginPath();
+            ctx.roundRect(o.x - 35, o.y - 17, 70, 34, 4);
+            ctx.fill();
+            // Windscreen (front is right)
+            ctx.fillStyle = '#64B5F6';
+            ctx.fillRect(o.x + 10, o.y - 13, 15, 26);
             
-            els.scenarioList.innerHTML += `
-                <div class="scenario-item">
-                    <div class="scenario-info">
-                        <div class="scenario-name">${s.code}: ${s.name}</div>
-                        <div class="scenario-desc">${s.expected_outcome}</div>
-                    </div>
-                    <div class="flex-row">
-                        ${statusBadge}
-                        <button class="primary" onclick="runScenario('${s.code}')" style="padding: 2px 8px; font-size: 0.8rem;">Run</button>
-                    </div>
-                </div>
-            `;
-        });
-    } catch (e) {
-        showError("Failed to fetch scenarios");
-    }
-}
-
-async function fetchConfig() {
-    try {
-        const res = await fetch('/api/config/risk');
-        const data = await res.json();
-        const cfg = {};
-        data.forEach(item => cfg[item.key] = item.value);
-        
-        if (cfg.ttc_warning_s) {
-            els.setTtcWarn.value = cfg.ttc_warning_s;
-            els.valTtcWarn.textContent = cfg.ttc_warning_s;
+            // Label
+            ctx.strokeStyle = TOKENS.car;
+            ctx.strokeRect(o.x - 35, o.y - 17, 70, 34);
+            ctx.fillStyle = TOKENS.car;
+            ctx.fillText(`car #${o.id}  ${o.conf.toFixed(2)}`, o.x - 35, o.y - 20);
+        } else if (o.cls === 'person') {
+            pedObj = o;
+            // Orange box
+            ctx.strokeStyle = TOKENS.ped;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(o.x - 14, o.y - 21, 28, 42);
+            // Head circle + body line
+            ctx.beginPath();
+            ctx.arc(o.x, o.y - 8, 6, 0, Math.PI * 2);
+            ctx.moveTo(o.x, o.y - 2);
+            ctx.lineTo(o.x, o.y + 12);
+            ctx.stroke();
+            // Label
+            ctx.fillStyle = TOKENS.ped;
+            ctx.fillText(`person #${o.id}  ${o.conf.toFixed(2)}`, o.x - 14, o.y - 25);
         }
-        if (cfg.ttc_critical_s) {
-            els.setTtcCrit.value = cfg.ttc_critical_s;
-            els.valTtcCrit.textContent = cfg.ttc_critical_s;
-        }
-    } catch (e) {
-        showError("Failed to fetch config");
-    }
-}
+    });
 
-// Pipeline Controls
-async function startPipeline() {
-    try {
-        const mode = els.modeSelect.value;
-        const res = await fetch('/api/pipeline/start', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({camera_id: 1, mode: mode})
-        });
-        
-        if (res.ok) {
-            appState.pipelineRunning = true;
-            appState.mode = mode;
-            updatePipelineUI();
+    // Conflict Line
+    if (data.conflict && carObj && pedObj) {
+        ctx.strokeStyle = data.conflict.level === 'critical' ? TOKENS.red : TOKENS.amber;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(carObj.x, carObj.y);
+        ctx.lineTo(pedObj.x, pedObj.y);
+        ctx.stroke();
+
+        // Midpoint label
+        const mx = (carObj.x + pedObj.x) / 2;
+        const my = (carObj.y + pedObj.y) / 2;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(mx - 25, my - 10, 50, 20);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillText(`TTC ${data.conflict.ttc}s`, mx - 20, my + 4);
+    }
+
+    ctx.restore();
+
+    // Chips & Captions (handled outside canvas)
+    document.getElementById('caption-text').textContent = CAPTIONS[data.stage] || "";
+    for (let i = 1; i <= 6; i++) {
+        const chip = document.getElementById('chip-' + i);
+        let isOn = false;
+        if (i <= 3) isOn = true;
+        else if (i === 4) isOn = (data.display !== 'clear' || data.conflict);
+        else if (i === 5) isOn = (data.display !== 'clear');
+        else if (i === 6) isOn = data.record;
+
+        chip.style.background = isOn ? (i === 5 ? TOKENS.amber : TOKENS.chipOn) : TOKENS.chipOff;
+        if (isOn && i === 5) {
+            chip.style.color = '#000';
         } else {
-            const err = await res.json();
-            alert("Error: " + err.detail);
+            chip.style.color = '#FFF';
         }
-    } catch (e) {
-        alert("Failed to start pipeline.");
     }
 }
 
-async function stopPipeline() {
-    try {
-        await fetch('/api/pipeline/stop', {method: 'POST'});
-        appState.pipelineRunning = false;
-        updatePipelineUI();
-    } catch (e) {
-        console.error("Failed to stop pipeline", e);
+let flashState = false;
+setInterval(() => { 
+    if (driverDisplay.classList.contains('warning') || driverDisplay.classList.contains('critical')) {
+        driverDisplay.classList.toggle('flash');
     }
-}
+}, 166);
 
-function updatePipelineUI() {
-    if (appState.pipelineRunning) {
-        els.btnStart.style.display = 'none';
-        els.btnStop.style.display = 'block';
-        els.statusBadge.textContent = 'RUNNING';
-        els.statusBadge.style.backgroundColor = 'rgba(76, 175, 80, 0.2)';
-        els.statusBadge.style.color = '#81C784';
-        
-        // Add timestamp to force reload
-        els.videoStream.src = `/video_feed?t=${new Date().getTime()}`;
-        els.videoStream.style.display = 'block';
-        els.videoPlaceholder.style.display = 'none';
+function updateUI(data) {
+    // Driver display
+    if (data.display === 'clear') {
+        driverDisplay.className = 'driver-display clear';
+        driverMain.textContent = 'ROAD CLEAR';
+        driverSub.textContent = '';
     } else {
-        els.btnStart.style.display = 'block';
-        els.btnStop.style.display = 'none';
-        els.statusBadge.textContent = 'STOPPED';
-        els.statusBadge.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-        els.statusBadge.style.color = '#ccc';
-        
-        els.videoStream.src = '';
-        els.videoStream.style.display = 'none';
-        els.videoPlaceholder.style.display = 'block';
+        const isCrit = data.display === 'critical';
+        const baseClass = `driver-display ${isCrit ? 'critical' : 'warning'}`;
+        const hasFlash = driverDisplay.classList.contains('flash');
+        driverDisplay.className = baseClass + (hasFlash ? ' flash' : '');
+        driverMain.textContent = 'SLOW DOWN';
+        driverSub.textContent = 'PEDESTRIAN CROSSING';
+    }
+
+    // Alerts
+    if (data.alerts && data.alerts.length > 0) {
+        liveAlerts.innerHTML = data.alerts.map(a => `
+            <div class="alert-card ${a.level}">
+                <div class="alert-title">${a.level === 'critical' ? 'CRITICAL' : 'WARNING'} TTC ${a.ttc}s</div>
+                <div class="alert-desc">${a.desc}</div>
+            </div>
+        `).join('');
+    }
+
+    // Metrics
+    if (data.metrics) {
+        document.getElementById('metric-warnings').textContent = `Warnings logged: ${data.metrics.warnings}`;
+        document.getElementById('metric-latency').textContent = `Response time: ${data.metrics.response_ms > 0 ? data.metrics.response_ms + ' ms' : '-'}`;
+        document.getElementById('metric-false').textContent = `False alerts: ${data.metrics.false_alerts}`;
     }
 }
 
-// Map Initialization
-async function initMap() {
-    // Demo City Center
-    appState.map = L.map('map').setView([20.0060, 78.0000], 15);
-    
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-    }).addTo(appState.map);
+// Ambulance Flow
+let ambAnimId = null;
 
-    // Load route
-    try {
-        const res = await fetch('/api/junctions');
-        const junctions = await res.json();
-        
-        // Just draw a line through junctions for visual route
-        const latlngs = junctions.sort((a,b) => a.lat - b.lat).map(j => [j.lat, j.lon]);
-        if (latlngs.length > 0) {
-            // Extend route slightly
-            latlngs.unshift([20.0000, 78.0000]);
-            latlngs.push([20.0120, 78.0000]);
-            appState.routeLayer = L.polyline(latlngs, {color: '#4CAF50', weight: 4, dashArray: '5, 10'}).addTo(appState.map);
+function runAmbulance(mode) {
+    if (ambAnimId) cancelAnimationFrame(ambAnimId);
+    
+    // Reset visuals
+    ['base', 'prio'].forEach(prefix => {
+        document.getElementById(`amb-${prefix}`).setAttribute('transform', 'translate(294, 620)');
+        document.getElementById(`arr-${prefix}`).setAttribute('opacity', '0');
+        document.getElementById(`stat-${prefix}-time`).textContent = 'Journey time: - s';
+        document.getElementById(`stat-${prefix}-stops`).textContent = 'Red-light stops: -';
+        document.getElementById(`stat-${prefix}-wait`).textContent = 'Waiting: - s';
+        [1,2,3].forEach(i => {
+            const r = document.getElementById(`${prefix}-ring-s${i}`);
+            if (r) r.setAttribute('opacity', '0');
+            const t = document.getElementById(`${prefix}-text-s${i}`);
+            if (t) t.setAttribute('opacity', '0');
+        });
+    });
+    document.getElementById('amb-overlay').style.display = 'none';
+
+    fetch('/api/ambulance/compare', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            updateAmbulanceChart(data.summary);
+            let startT = performance.now();
+            function animate(time) {
+                // ~10x compression: 1 simulated second = 100ms real time
+                let elapsedSim = (time - startT) / 100; 
+                
+                let baseDone = updateAmbulancePanel('base', data.baseline, elapsedSim);
+                let prioDone = updateAmbulancePanel('prio', data.priority, elapsedSim);
+                
+                if (mode === 'compare' && baseDone && prioDone) {
+                    showAmbulanceOverlay(data.summary);
+                    setTimeout(resetAmbulances, 5000);
+                } else if (mode === 'baseline' && baseDone) {
+                    setTimeout(resetAmbulances, 5000);
+                } else if (mode === 'priority' && prioDone) {
+                    setTimeout(resetAmbulances, 5000);
+                } else {
+                    ambAnimId = requestAnimationFrame(animate);
+                }
+            }
+            ambAnimId = requestAnimationFrame(animate);
+        });
+}
+
+function updateAmbulancePanel(prefix, timeline, elapsedSim) {
+    if (!timeline || timeline.length === 0) return true;
+    
+    // Find closest frame
+    let frame = timeline[timeline.length - 1];
+    let done = true;
+    for (let i = 0; i < timeline.length; i++) {
+        if (timeline[i].clock_s >= elapsedSim) {
+            frame = timeline[i];
+            done = false;
+            break;
         }
+    }
+    
+    if (frame) {
+        let y = 620 - frame.route_fraction * (620 - 125);
+        document.getElementById(`amb-${prefix}`).setAttribute('transform', `translate(294, ${y})`);
         
-        // Setup signal markers
-        const sigRes = await fetch('/api/signals');
-        const signals = await sigRes.json();
-        
-        signals.forEach(s => {
-            const icon = L.divIcon({
-                className: 'custom-div-icon',
-                html: `<div style="background-color: ${getSignalColorHex(s.ns_colour)}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid white;"></div>`,
-                iconSize: [20, 20],
-                iconAnchor: [10, 10]
-            });
+        [1,2,3].forEach(i => {
+            const state = frame.signals[`S${i}`] || 'green';
+            document.getElementById(`${prefix}-s${i}`).setAttribute('fill', state === 'red' ? TOKENS.red : TOKENS.green);
             
-            const marker = L.marker([s.lat, s.lon], {icon: icon}).addTo(appState.map);
-            marker.bindPopup(`<b>${s.name}</b><br>Code: ${s.code}`);
-            appState.signalMarkers[s.id] = marker;
+            if (prefix === 'prio') {
+                const isPrio = frame.priority_active[`S${i}`];
+                document.getElementById(`prio-ring-s${i}`).setAttribute('opacity', isPrio ? '1' : '0');
+                document.getElementById(`prio-text-s${i}`).setAttribute('opacity', isPrio ? '1' : '0');
+            }
         });
         
-        setTimeout(() => appState.map.invalidateSize(), 500);
+        document.getElementById(`stat-${prefix}-stops`).textContent = `Red-light stops: ${frame.stops}`;
+        document.getElementById(`stat-${prefix}-wait`).textContent = `Waiting: ${frame.wait_s.toFixed(1)} s`;
         
-    } catch (e) {
-        showError("Failed to init map data");
-    }
-}
-
-function getSignalColorHex(colorName) {
-    if (colorName === 'green') return '#4CAF50';
-    if (colorName === 'yellow') return '#FFEB3B';
-    if (colorName === 'red') return '#F44336';
-    return '#999';
-}
-
-function updateSignalOnMap(state) {
-    if (!state || !state.signal_id) return;
-    const marker = appState.signalMarkers[state.signal_id];
-    if (marker) {
-        const hex = getSignalColorHex(state.ns_colour);
-        let border = '2px solid white';
-        if (state.preempt_active) {
-            border = '3px solid #00BCD4'; // Highlight pre-empted signals
+        if (done) {
+            document.getElementById(`arr-${prefix}`).setAttribute('opacity', '1');
+            document.getElementById(`stat-${prefix}-time`).textContent = `Journey time: ${frame.clock_s.toFixed(1)} s`;
+        } else {
+            document.getElementById(`stat-${prefix}-time`).textContent = `Journey time: ${elapsedSim.toFixed(1)} s`;
         }
-        
-        const icon = L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div style="background-color: ${hex}; width: 16px; height: 16px; border-radius: 50%; border: ${border};"></div>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-        });
-        marker.setIcon(icon);
     }
+    return done;
 }
 
-function updateAmbulanceOnMap(data) {
-    if (!appState.map) return;
-    
-    if (!appState.ambMarker) {
-        const icon = L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div style="background-color: #00BCD4; width: 24px; height: 24px; text-align:center; line-height:24px; border-radius: 4px; border: 2px solid white; color: black; font-weight: bold; font-size: 14px;">+</div>`,
-            iconSize: [28, 28],
-            iconAnchor: [14, 14]
-        });
-        appState.ambMarker = L.marker([data.lat, data.lon], {icon: icon, zIndexOffset: 1000}).addTo(appState.map);
-    } else {
-        appState.ambMarker.setLatLng([data.lat, data.lon]);
-    }
-    
-    // Highlight if emergency
-    if (data.emergency) {
-        appState.ambMarker._icon.firstChild.style.backgroundColor = '#2196F3';
-        appState.ambMarker._icon.firstChild.style.boxShadow = '0 0 10px #2196F3';
-    } else {
-        appState.ambMarker._icon.firstChild.style.backgroundColor = '#999';
-        appState.ambMarker._icon.firstChild.style.boxShadow = 'none';
-    }
+function showAmbulanceOverlay(summary) {
+    document.getElementById('amb-overlay').style.display = 'flex';
+    document.getElementById('amb-saved').textContent = `Journey time saved: ${summary.time_saved_pct}%`;
+    document.getElementById('amb-saved-sub').textContent = `${summary.baseline.duration_s.toFixed(1)} s -> ${summary.priority.duration_s.toFixed(1)} s, ${summary.baseline.stops} stops -> ${summary.priority.stops} stops`;
 }
 
-// Chart Initialization
-function initChart() {
-    const ctx = els.ambChart.getContext('2d');
-    Chart.defaults.color = '#aaaaaa';
-    Chart.defaults.font.family = "'Inter', sans-serif";
+function resetAmbulances() {
+    ['base', 'prio'].forEach(prefix => {
+        document.getElementById(`amb-${prefix}`).setAttribute('transform', 'translate(294, 620)');
+        document.getElementById(`arr-${prefix}`).setAttribute('opacity', '0');
+    });
+    document.getElementById('amb-overlay').style.display = 'none';
+}
+
+let ambChart = null;
+function updateAmbulanceChart(summary) {
+    if (!summary || !document.getElementById('ambChart')) return;
+    const ctx = document.getElementById('ambChart').getContext('2d');
+    if (ambChart) ambChart.destroy();
     
-    appState.chart = new Chart(ctx, {
+    Chart.defaults.color = '#F0F0F0';
+    ambChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: ['Duration (s)', 'Wait Time (s)', 'Stops'],
+            labels: ['Journey Time (s)', 'Wait Time (s)', 'Stops'],
             datasets: [
                 {
                     label: 'Baseline',
-                    backgroundColor: 'rgba(255, 152, 0, 0.8)',
-                    data: [0, 0, 0]
+                    backgroundColor: '#AAAAAA',
+                    data: [summary.baseline.duration_s, summary.baseline.wait_s, summary.baseline.stops]
                 },
                 {
                     label: 'Priority',
-                    backgroundColor: 'rgba(33, 150, 243, 0.8)',
-                    data: [0, 0, 0]
+                    backgroundColor: '#5AC850',
+                    data: [summary.priority.duration_s, summary.priority.wait_s, summary.priority.stops]
                 }
             ]
         },
@@ -423,161 +389,59 @@ function initChart() {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.1)' } },
-                x: { grid: { display: false } }
+                y: { beginAtZero: true, grid: { color: '#333' } },
+                x: { grid: { color: '#333' } }
             },
             plugins: {
-                legend: { position: 'bottom' }
+                legend: { labels: { color: '#F0F0F0' } }
             }
         }
     });
 }
 
-function updateChart(comparisonData) {
-    if (!appState.chart) return;
-    
-    let base = {avg_duration_s: 0, avg_wait_s: 0, avg_stops: 0};
-    let prio = {avg_duration_s: 0, avg_wait_s: 0, avg_stops: 0};
-    
-    comparisonData.forEach(d => {
-        if (d.mode === 'baseline') base = d;
-        if (d.mode === 'priority') prio = d;
-    });
-    
-    appState.chart.data.datasets[0].data = [base.avg_duration_s, base.avg_wait_s, base.avg_stops * 10]; // scale stops for visibility
-    appState.chart.data.datasets[1].data = [prio.avg_duration_s, prio.avg_wait_s, prio.avg_stops * 10];
-    appState.chart.update();
+// Analytics Tab
+function fetchAnalytics() {
+    fetch('/api/hotspots')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('hotspots-body').innerHTML = data.map(h => `
+                <tr>
+                    <td>Cam ${h.camera_id}</td>
+                    <td>${h.zone_name}</td>
+                    <td>${h.alert_count} <span class="demo-label">demo data</span></td>
+                </tr>
+            `).join('');
+        });
+        
+    fetch('/api/scenarios/results')
+        .then(r => r.json())
+        .then(data => {
+            renderScenarios(data);
+        });
 }
 
-// Actions
-window.runScenario = async function(code) {
-    try {
-        await fetch(`/api/scenarios/${code}/run`, {method: 'POST'});
-        fetchScenarios();
-    } catch (e) {
-        alert("Scenario failed");
-    }
+function renderScenarios(results) {
+    document.getElementById('scenarios-body').innerHTML = results.map(r => `
+        <div style="display:flex; justify-content:space-between; padding:8px; background:var(--card); border-radius:4px;">
+            <div>
+                <div style="font-weight:bold;">${r.scenario_id}</div>
+                <div style="font-size:12px; color:var(--muted);">${r.description}</div>
+            </div>
+            <div class="status-badge ${r.passed ? 'status-pass' : 'status-fail'}">${r.passed ? 'PASS' : 'FAIL'}</div>
+        </div>
+    `).join('');
 }
 
-document.getElementById('btn-run-all').addEventListener('click', async () => {
-    try {
-        els.scenarioList.innerHTML = '<div style="text-align:center; padding:1rem;">Running all scenarios...</div>';
-        await fetch('/api/scenarios/run-all', {method: 'POST'});
-        fetchScenarios();
-    } catch (e) {
-        alert("Run all failed");
-    }
+function runScenarios() {
+    fetch('/api/scenarios/run-all', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => renderScenarios(data.results));
+}
+
+// Risk Settings
+document.getElementById('set-ttc-warn')?.addEventListener('input', e => {
+    document.getElementById('val-ttc-warn').textContent = parseFloat(e.target.value).toFixed(1);
 });
-
-els.btnSimBaseline.addEventListener('click', async () => {
-    els.ambStatus.textContent = "Running baseline simulation...";
-    try {
-        await fetch('/api/ambulance/simulate', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({route_id: 1, mode: 'baseline', sim_speed: 10})
-        });
-        els.ambStatus.textContent = "Baseline complete.";
-        fetchMetrics();
-    } catch (e) {
-        els.ambStatus.textContent = "Simulation failed.";
-    }
-});
-
-els.btnSimPriority.addEventListener('click', async () => {
-    els.ambStatus.textContent = "Running priority simulation...";
-    try {
-        await fetch('/api/ambulance/simulate', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({route_id: 1, mode: 'priority', sim_speed: 10})
-        });
-        els.ambStatus.textContent = "Priority complete.";
-        fetchMetrics();
-    } catch (e) {
-        els.ambStatus.textContent = "Simulation failed.";
-    }
-});
-
-els.btnCompare.addEventListener('click', async () => {
-    els.ambStatus.textContent = "Running comparison (baseline then priority)...";
-    els.ambSaved.style.display = 'none';
-    try {
-        await fetch('/api/ambulance/simulate', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({route_id: 1, mode: 'baseline', sim_speed: 10})
-        });
-        await fetch('/api/ambulance/simulate', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({route_id: 1, mode: 'priority', sim_speed: 10})
-        });
-        
-        // Fetch comparison
-        const res = await fetch('/api/ambulance/comparison');
-        const data = await res.json();
-        
-        els.ambStatus.textContent = "Comparison complete.";
-        els.ambSaved.textContent = `Priority saved ${data.time_saved_pct}% of journey time!`;
-        els.ambSaved.style.display = 'block';
-        
-        fetchMetrics();
-    } catch (e) {
-        els.ambStatus.textContent = "Comparison failed.";
-    }
-});
-
-// Settings
-els.setTtcWarn.addEventListener('input', (e) => els.valTtcWarn.textContent = e.target.value);
-els.setTtcCrit.addEventListener('input', (e) => els.valTtcCrit.textContent = e.target.value);
-
-els.btnSaveSettings.addEventListener('click', async () => {
-    try {
-        await fetch('/api/config/risk', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                values: {
-                    ttc_warning_s: parseFloat(els.setTtcWarn.value),
-                    ttc_critical_s: parseFloat(els.setTtcCrit.value)
-                }
-            })
-        });
-        
-        const btn = els.btnSaveSettings;
-        const origText = btn.textContent;
-        btn.textContent = "Saved!";
-        btn.classList.add("success");
-        setTimeout(() => {
-            btn.textContent = origText;
-            btn.classList.remove("success");
-        }, 2000);
-    } catch (e) {
-        alert("Failed to save settings");
-    }
-});
-
-els.btnStart.addEventListener('click', startPipeline);
-els.btnStop.addEventListener('click', stopPipeline);
-
-// Initialization
-document.addEventListener('DOMContentLoaded', () => {
-    connectWS();
-    initMap();
-    initChart();
-    
-    // Initial fetches
-    fetchState();
-    fetchMetrics();
-    fetchEvents();
-    fetchHotspots();
-    fetchScenarios();
-    fetchConfig();
-    
-    // Polling for metrics and hotspots
-    setInterval(() => {
-        fetchMetrics();
-        fetchHotspots();
-    }, 3000);
+document.getElementById('set-ttc-crit')?.addEventListener('input', e => {
+    document.getElementById('val-ttc-crit').textContent = parseFloat(e.target.value).toFixed(1);
 });

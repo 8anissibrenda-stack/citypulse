@@ -226,9 +226,7 @@ class RiskEngine:
         if not self._has_velocity(vru.track_id) or not self._has_velocity(veh.track_id):
             return None
 
-        # Ignore stopped/queued vehicles
-        if veh_hist.speed < self.cfg.min_vehicle_speed_mps:
-            return None
+        veh_stopped = veh_hist.speed < self.cfg.min_vehicle_speed_mps
 
         # --- CPA / TTC computation ---
         ppm = self.cfg.pixels_per_meter
@@ -272,23 +270,13 @@ class RiskEngine:
                             zone_conflict = True
                     break
 
-        # No conflict detected
-        if t_cpa is None or d_cpa > self.cfg.collision_radius_m:
+        # No conflict detected or vehicle is stopped
+        if veh_stopped or t_cpa is None or d_cpa > self.cfg.collision_radius_m:
             pair_key = (vru.track_id, veh.track_id)
             if pair_key in self._conflicts:
                 state = self._conflicts[pair_key]
                 if state.alerted and self._is_in_crossing(vru):
                     state.active = True
-                    return RiskAlert(
-                        event_type="critical" if state.last_alert_severity == 3 else "warning",
-                        severity=state.last_alert_severity,
-                        ttc_s=round(state.min_ttc, 2),
-                        min_distance_m=round(state.min_distance, 2),
-                        risk_score=50.0,
-                        vru=vru,
-                        vehicle=veh,
-                        zone_name=self._get_zone(vru),
-                    )
             return None
 
         # --- Determine severity level ---

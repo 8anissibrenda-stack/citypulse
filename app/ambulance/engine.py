@@ -311,6 +311,7 @@ def simulate_run(
             "lon": round(lon, 6),
             "speed_kmh": round(speed * 3.6, 1),
             "t": round(sim_t, 1),
+            "route_distance_m": position_m,
         }
         positions.append(pos_entry)
 

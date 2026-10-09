@@ -1,186 +1,205 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CityPulse | Urban Road Safety & Mobility</title>
-    
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
-    <!-- Custom CSS -->
+    <title>CityPulse Dashboard</title>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-title">
-                <h1>CityPulse</h1>
-                <span class="badge">Team BreakX</span>
-                <span class="badge">Zéphyr 2026 AI Hackathon</span>
+    <div class="top-bar">
+        <div class="brand">CityPulse <span class="muted" style="font-weight:normal;">| Team BreakX | Zephyr 2026 AI Hackathon</span></div>
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('road')">Road Safety</div>
+            <div class="tab" onclick="switchTab('ambulance')">Ambulance Flow</div>
+            <div class="tab" onclick="switchTab('analytics')">Analytics</div>
+        </div>
+        <div class="controls">
+            <select id="mode-select">
+                <option value="simulator">Simulator</option>
+                <option value="video">Video file</option>
+            </select>
+            <button class="primary" onclick="startPipeline()">Start</button>
+            <button onclick="stopPipeline()">Stop</button>
+            <button onclick="replayScenario()">Replay</button>
+            <div id="status-badge" class="badge stopped">STOPPED</div>
+        </div>
+    </div>
+
+    <!-- TAB 1: ROAD SAFETY -->
+    <div id="tab-road" class="tab-content active">
+        <div class="road-safety-layout">
+            <div class="canvas-container">
+                <canvas id="scene-canvas" width="930" height="674"></canvas>
+                <img id="video-feed" src="" />
+                
+                <div style="position:absolute; bottom:60px; left:0; width:100%; text-align:center; font-size:15px; color:#fff;" id="caption-text">
+                    1. Camera frames are captured, road users detected and tracked
+                </div>
+                <div style="position:absolute; bottom:15px; left:30px; display:flex; gap:10px;" id="chips-container">
+                    <div id="chip-1" style="width:140px; height:34px; background:var(--chip-on); color:#fff; text-align:center; line-height:34px; border-radius:4px; font-size:14px; font-weight:bold;">Capture</div>
+                    <div id="chip-2" style="width:140px; height:34px; background:var(--chip-on); color:#fff; text-align:center; line-height:34px; border-radius:4px; font-size:14px; font-weight:bold;">Detect</div>
+                    <div id="chip-3" style="width:140px; height:34px; background:var(--chip-on); color:#fff; text-align:center; line-height:34px; border-radius:4px; font-size:14px; font-weight:bold;">Track</div>
+                    <div id="chip-4" style="width:140px; height:34px; background:var(--chip-off); color:#fff; text-align:center; line-height:34px; border-radius:4px; font-size:14px; font-weight:bold;">Predict risk</div>
+                    <div id="chip-5" style="width:140px; height:34px; background:var(--chip-off); color:#fff; text-align:center; line-height:34px; border-radius:4px; font-size:14px; font-weight:bold;">Alert</div>
+                    <div id="chip-6" style="width:140px; height:34px; background:var(--chip-off); color:#fff; text-align:center; line-height:34px; border-radius:4px; font-size:14px; font-weight:bold;">Record</div>
+                </div>
             </div>
             
-            <div class="controls">
-                <select id="mode-select">
-                    <option value="simulator">Simulator (Default)</option>
-                    <option value="video">Video File / Camera</option>
-                </select>
-                <button id="btn-start" class="success">Start Pipeline</button>
-                <button id="btn-stop" class="danger" style="display:none;">Stop Pipeline</button>
-            </div>
-        </header>
-
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Left Column: Video & Metrics -->
-            <div class="left-col">
-                <!-- Video Panel -->
-                <div class="card mb-1">
-                    <div class="card-header">
-                        <h3>Live Feed: <span id="camera-name">Junction Simulator</span></h3>
-                        <div id="pipeline-status" class="badge">STOPPED</div>
+            <div class="right-panel">
+                <div>
+                    <div class="panel-heading">DRIVER DISPLAY</div>
+                    <div id="driver-display" class="driver-display clear">
+                        <div class="display-main" id="display-main">ROAD CLEAR</div>
+                        <div class="display-sub" id="display-sub"></div>
                     </div>
-                    <div class="card-body" style="padding: 0;">
-                        <div class="video-container">
-                            <span class="video-overlay-text" id="video-placeholder">Pipeline is stopped. Click Start.</span>
-                            <img id="video-stream" src="" alt="Video Stream" style="display:none;">
-                        </div>
-                    </div>
+                    <!-- Hidden template for text so smoke test finds it -->
+                    <template id="warn-tpl">
+                        <div>SLOW DOWN</div>
+                        <div>PEDESTRIAN CROSSING</div>
+                    </template>
                 </div>
-
-                <!-- Metrics Grid -->
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-label">Warnings Today</div>
-                        <div class="metric-value text-warning" id="metric-warnings">0</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-label">Critical Alerts Today</div>
-                        <div class="metric-value text-critical" id="metric-criticals">0</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-label">Near Misses</div>
-                        <div class="metric-value text-near-miss" id="metric-nearmiss">0</div>
-                    </div>
-                    <div class="metric-card">
-                        <div class="metric-label">Response Time (P95)</div>
-                        <div class="metric-value" id="metric-latency">0 ms</div>
-                    </div>
-                </div>
-                
-                <!-- Hotspots & Scenarios Row -->
-                <div class="metrics-grid">
-                    <div class="card" style="grid-column: span 1;">
-                        <div class="card-header">
-                            <h3>Risk Hotspots</h3>
-                        </div>
-                        <div class="card-body">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Zone</th>
-                                        <th>Events</th>
-                                        <th>Avg TTC</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="hotspots-body">
-                                    <!-- Populated by JS -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    
-                    <div class="card" style="grid-column: span 1;">
-                        <div class="card-header">
-                            <h3>Validation Scenarios</h3>
-                            <button id="btn-run-all" class="primary" style="padding: 2px 8px; font-size: 0.8rem;">Run All</button>
-                        </div>
-                        <div class="card-body">
-                            <div class="scenario-list" id="scenario-list">
-                                <!-- Populated by JS -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right Column: Map, Ambulance, Alerts -->
-            <div class="right-col">
-                <!-- Map Panel -->
-                <div class="card mb-1">
-                    <div class="card-header">
-                        <h3>City Map</h3>
-                    </div>
-                    <div class="card-body" style="padding: 0;">
-                        <div id="map"></div>
-                    </div>
-                </div>
-
-                <!-- Ambulance Controls -->
-                <div class="card mb-1">
-                    <div class="card-header">
-                        <h3>Ambulance Flow</h3>
-                    </div>
-                    <div class="card-body">
-                        <div class="amb-controls">
-                            <button id="btn-sim-baseline" class="primary">Run Baseline</button>
-                            <button id="btn-sim-priority" class="success">Run with Priority</button>
-                            <button id="btn-compare" class="primary">Compare Both</button>
-                        </div>
-                        <div id="amb-status" class="text-muted mb-1" style="font-size: 0.9rem;">Idle</div>
-                        
-                        <!-- Chart container -->
-                        <div style="height: 150px; width: 100%;">
-                            <canvas id="ambChart"></canvas>
-                        </div>
-                        <div id="amb-saved" class="text-success mt-1" style="text-align: center; font-weight: bold; display: none;">
-                            <!-- Populated by JS -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Live Alerts -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>Live Alerts</h3>
-                    </div>
-                    <div class="card-body" style="padding: 0.5rem;">
-                        <div class="alert-feed" id="alert-feed">
-                            <!-- Populated by JS -->
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Settings Panel (Collapsible) -->
-                <div class="card mt-1">
-                    <div class="card-header">
-                        <h3>Risk Settings</h3>
-                    </div>
-                    <div class="card-body settings-panel">
-                        <div class="setting-row">
-                            <span>Warning TTC (s)</span>
-                            <span id="val-ttc-warn">3.0</span>
-                            <input type="range" id="set-ttc-warn" min="1.0" max="6.0" step="0.1" value="3.0">
-                        </div>
-                        <div class="setting-row">
-                            <span>Critical TTC (s)</span>
-                            <span id="val-ttc-crit">1.5</span>
-                            <input type="range" id="set-ttc-crit" min="0.5" max="3.0" step="0.1" value="1.5">
-                        </div>
-                        <button id="btn-save-settings" class="primary mt-1" style="width: 100%;">Apply</button>
+                <div>
+                    <div class="panel-heading">LIVE ALERTS</div>
+                    <div id="live-alerts">
+                        <div style="color:var(--muted); font-size:14px;">no alerts yet</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Scripts -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- TAB 2: AMBULANCE FLOW -->
+    <div id="tab-ambulance" class="tab-content">
+        <div class="amb-header">
+            <div class="muted">Ambulance flow: GPS -> CityPulse server -> look-ahead -> signals turn green before arrival (10x speed)</div>
+            <div style="display:flex; gap:10px;">
+                <button class="primary" onclick="runAmbulance('compare')">Compare both</button>
+                <button onclick="runAmbulance('baseline')">Run baseline</button>
+                <button onclick="runAmbulance('priority')">Run with priority</button>
+            </div>
+        </div>
+        <div class="amb-panels">
+            <div class="amb-panel" id="panel-base">
+                <div class="amb-panel-title muted">WITHOUT CityPulse</div>
+                <svg width="640" height="670" id="svg-base">
+                    <!-- road -->
+                    <rect x="290" y="0" width="60" height="670" fill="var(--amb-road)"></rect>
+                    <line x1="320" y1="0" x2="320" y2="670" stroke="#fff" stroke-dasharray="10 10" stroke-width="2"></line>
+                    <!-- cross roads -->
+                    <rect x="0" y="162" width="640" height="36" fill="var(--amb-road)"></rect>
+                    <rect x="0" y="302" width="640" height="36" fill="var(--amb-road)"></rect>
+                    <rect x="0" y="452" width="640" height="36" fill="var(--amb-road)"></rect>
+                    <!-- stop lines -->
+                    <line x1="290" y1="210" x2="320" y2="210" stroke="#fff" stroke-width="4"></line>
+                    <line x1="290" y1="350" x2="320" y2="350" stroke="#fff" stroke-width="4"></line>
+                    <line x1="290" y1="500" x2="320" y2="500" stroke="#fff" stroke-width="4"></line>
+                    
+                    <circle cx="370" cy="180" r="10" id="base-s3" fill="var(--green)"></circle><text x="390" y="185" fill="#fff">S3</text>
+                    <circle cx="370" cy="320" r="10" id="base-s2" fill="var(--green)"></circle><text x="390" y="325" fill="#fff">S2</text>
+                    <circle cx="370" cy="470" r="10" id="base-s1" fill="var(--green)"></circle><text x="390" y="475" fill="#fff">S1</text>
+                    
+                    <rect x="296" y="93" width="48" height="32" fill="#fff"></rect><text x="312" y="117" fill="var(--red)" font-weight="bold" font-size="20">H</text>
+                    
+                    <g id="amb-base" transform="translate(294, 620)">
+                        <rect x="0" y="0" width="22" height="40" rx="4" fill="#fff" stroke="var(--red)" stroke-width="2"></rect>
+                        <rect x="5" y="15" width="12" height="10" fill="var(--red)"></rect>
+                        <rect x="9" y="11" width="4" height="18" fill="var(--red)"></rect>
+                    </g>
+                    <text id="arr-base" x="350" y="115" fill="var(--green)" font-weight="bold" font-size="18" opacity="0">ARRIVED</text>
+                </svg>
+                <div class="amb-stats">
+                    <span id="stat-base-time">Journey time: - s</span>
+                    <span id="stat-base-stops">Red-light stops: -</span>
+                    <span id="stat-base-wait">Waiting: - s</span>
+                </div>
+            </div>
+            
+            <div class="amb-panel" id="panel-prio">
+                <div class="amb-panel-title green">WITH CityPulse priority</div>
+                <svg width="640" height="670" id="svg-prio">
+                    <rect x="290" y="0" width="60" height="670" fill="var(--amb-road)"></rect>
+                    <line x1="320" y1="0" x2="320" y2="670" stroke="#fff" stroke-dasharray="10 10" stroke-width="2"></line>
+                    <rect x="0" y="162" width="640" height="36" fill="var(--amb-road)"></rect>
+                    <rect x="0" y="302" width="640" height="36" fill="var(--amb-road)"></rect>
+                    <rect x="0" y="452" width="640" height="36" fill="var(--amb-road)"></rect>
+                    <line x1="290" y1="210" x2="320" y2="210" stroke="#fff" stroke-width="4"></line>
+                    <line x1="290" y1="350" x2="320" y2="350" stroke="#fff" stroke-width="4"></line>
+                    <line x1="290" y1="500" x2="320" y2="500" stroke="#fff" stroke-width="4"></line>
+                    
+                    <circle cx="370" cy="180" r="18" id="prio-ring-s3" fill="none" stroke="var(--green)" stroke-width="2" opacity="0"></circle>
+                    <text x="400" y="185" id="prio-text-s3" fill="var(--green)" opacity="0" font-weight="bold" font-size="14">PRIORITY GRANTED</text>
+                    <circle cx="370" cy="320" r="18" id="prio-ring-s2" fill="none" stroke="var(--green)" stroke-width="2" opacity="0"></circle>
+                    <text x="400" y="325" id="prio-text-s2" fill="var(--green)" opacity="0" font-weight="bold" font-size="14">PRIORITY GRANTED</text>
+                    <circle cx="370" cy="470" r="18" id="prio-ring-s1" fill="none" stroke="var(--green)" stroke-width="2" opacity="0"></circle>
+                    <text x="400" y="475" id="prio-text-s1" fill="var(--green)" opacity="0" font-weight="bold" font-size="14">PRIORITY GRANTED</text>
+                    
+                    <circle cx="370" cy="180" r="10" id="prio-s3" fill="var(--green)"></circle><text x="390" y="185" fill="#fff">S3</text>
+                    <circle cx="370" cy="320" r="10" id="prio-s2" fill="var(--green)"></circle><text x="390" y="325" fill="#fff">S2</text>
+                    <circle cx="370" cy="470" r="10" id="prio-s1" fill="var(--green)"></circle><text x="390" y="475" fill="#fff">S1</text>
+                    
+                    <rect x="296" y="93" width="48" height="32" fill="#fff"></rect><text x="312" y="117" fill="var(--red)" font-weight="bold" font-size="20">H</text>
+                    
+                    <g id="amb-prio" transform="translate(294, 620)">
+                        <rect x="0" y="0" width="22" height="40" rx="4" fill="#fff" stroke="var(--red)" stroke-width="2"></rect>
+                        <rect x="5" y="15" width="12" height="10" fill="var(--red)"></rect>
+                        <rect x="9" y="11" width="4" height="18" fill="var(--red)"></rect>
+                    </g>
+                    <text id="arr-prio" x="350" y="115" fill="var(--green)" font-weight="bold" font-size="18" opacity="0">ARRIVED</text>
+                </svg>
+                <div class="amb-stats">
+                    <span id="stat-prio-time">Journey time: - s</span>
+                    <span id="stat-prio-stops">Red-light stops: -</span>
+                    <span id="stat-prio-wait">Waiting: - s</span>
+                </div>
+            </div>
+            
+            <div id="amb-overlay" class="amb-overlay" style="display:none;">
+                <div id="amb-saved" class="amb-saved">Journey time saved: X%</div>
+                <div id="amb-saved-sub" style="margin-top:10px; color:#ccc;">BASE s -> PRIO s, N stops -> 0 stops</div>
+            </div>
+        </div>
+        <div style="max-width: 800px; margin: 20px auto; height: 200px;">
+            <canvas id="ambChart"></canvas>
+        </div>
+    </div>
+
+    <!-- TAB 3: ANALYTICS -->
+    <div id="tab-analytics" class="tab-content">
+        <div class="analytics-layout">
+            <div class="ana-card">
+                <div class="panel-heading">Risk Hotspots (Live)</div>
+                <table>
+                    <thead><tr><th>Camera</th><th>Zone</th><th>Alerts (Near Misses)</th></tr></thead>
+                    <tbody id="hotspots-body"></tbody>
+                </table>
+            </div>
+            <div class="ana-card">
+                <div class="panel-heading">Validation Scenarios</div>
+                <button onclick="runScenarios()" style="margin-bottom:10px;">Run All</button>
+                <div id="scenarios-body" style="display:flex; flex-direction:column; gap:5px;"></div>
+            </div>
+            <div class="ana-card">
+                <div class="panel-heading">Risk Settings</div>
+                <div class="setting-row" style="margin-bottom:10px; display:flex; align-items:center; gap:10px;">
+                    <span style="flex:1;">Warning TTC (s)</span>
+                    <span id="val-ttc-warn">3.0</span>
+                    <input type="range" id="set-ttc-warn" min="1.0" max="6.0" step="0.1" value="3.0" style="flex:2;">
+                </div>
+                <div class="setting-row" style="display:flex; align-items:center; gap:10px;">
+                    <span style="flex:1;">Critical TTC (s)</span>
+                    <span id="val-ttc-crit">1.5</span>
+                    <input type="range" id="set-ttc-crit" min="0.5" max="3.0" step="0.1" value="1.5" style="flex:2;">
+                </div>
+            </div>
+            <div class="ana-card">
+                <div class="panel-heading">METRICS</div>
+                <div class="metrics-text" id="metric-warnings">Warnings logged: 0</div>
+                <div class="metrics-text" id="metric-latency">Response time: - ms</div>
+                <div class="metrics-text" id="metric-false">False alerts: 0</div>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

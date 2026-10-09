@@ -29,6 +29,8 @@ class TrackedObject:
     cx: float
     cy: float
     ts: float
+    vx: float = 0.0
+    vy: float = 0.0
 
 
 @dataclass

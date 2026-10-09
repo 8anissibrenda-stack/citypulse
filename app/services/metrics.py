@@ -24,7 +24,7 @@ def get_live_metrics() -> dict[str, Any]:
              SUM(CASE WHEN event_type='warning' THEN 1 ELSE 0 END) as warnings,
              SUM(CASE WHEN event_type='critical' THEN 1 ELSE 0 END) as criticals,
              SUM(CASE WHEN event_type='near_miss' THEN 1 ELSE 0 END) as near_misses
-           FROM events WHERE is_seed = 0"""
+           FROM events WHERE is_seed = 0 AND date(ts) = date('now')"""
     ) or {}
 
     # Latency stats

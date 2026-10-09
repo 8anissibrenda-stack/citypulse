@@ -257,7 +257,7 @@ async def run_scenario(code: str) -> dict:
 
 
 @router.post("/run-all")
-async def run_all_scenarios() -> list[dict]:
+async def run_all_scenarios() -> dict:
     """Run all scenarios and return results."""
     scenarios = db.query_all("SELECT * FROM test_scenarios ORDER BY id")
     results = []
@@ -278,7 +278,7 @@ async def run_all_scenarios() -> list[dict]:
         )
         results.append(result)
 
-    return results
+    return {"results": results}
 
 
 @router.get("/results")
