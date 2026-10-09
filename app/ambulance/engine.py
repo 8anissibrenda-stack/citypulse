@@ -309,7 +309,7 @@ def simulate_run(
         signals_state = {}
         priority_state = {}
         for sig_id in signal_controller._signals:
-            key = f"S{4 - sig_id}"
+            key = f"S{sig_id}"
             st = signal_controller.get_state(sig_id)
             signals_state[key] = st["ns_colour"]
             priority_state[key] = st["preempt_active"] and st["preempt_approach"] == "NS"
