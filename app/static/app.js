@@ -297,8 +297,8 @@ function runAmbulance(mode) {
             updateAmbulanceChart(data.summary);
             let startT = performance.now();
             function animate(time) {
-                // ~10x compression: 1 real second = 10 sim seconds
-                let elapsedSim = (time - startT) / 100;
+                // ~3x compression: 1 real second = 3.33 sim seconds
+                let elapsedSim = (time - startT) / 300;
                 
                 let baseTicks = data.baseline.ticks || [];
                 let prioTicks = data.priority.ticks || [];
