@@ -231,7 +231,8 @@ def simulate_run(
                     continue
                 sig_pos = signal_positions.get(sig_id, 0)
                 dist_ahead = sig_pos - position_m
-                if 0 < dist_ahead <= trigger_distance_m:
+                trigger_distance = (190 / 495) * total_dist
+                if 0 < dist_ahead <= trigger_distance:
                     eta = dist_ahead / max(speed, 0.1)
                     signal_controller.request_priority(sig_id, "NS", eta)
 
@@ -244,44 +245,30 @@ def simulate_run(
             sig_pos = signal_positions.get(sig_id, 0)
             dist_to_signal = sig_pos - position_m
 
-            if dist_to_signal <= 2.0 and dist_to_signal > -5.0:
-                # At the signal
-                colour = signal_controller.get_colour(sig_id, "NS")
-                if mode == "baseline" and colour.value != "green":
-                    at_red = True
-                    if waiting_at != sig_id:
-                        waiting_at = sig_id
-                        phase_name = colour.value
-                        signal_log.append({
-                            "signal_id": sig_id,
-                            "arrival_s": round(sim_t, 1),
-                            "phase_on_arrival": phase_name,
-                            "wait_s": 0,
-                            "preempted": 0,
-                        })
-                        stops += 1
-                    else:
-                        # Still waiting
-                        signal_log[-1]["wait_s"] = round(signal_log[-1]["wait_s"] + dt, 1)
-                        total_wait += dt
-                elif colour.value == "green":
-                    if waiting_at == sig_id:
-                        waiting_at = None
-                    if sig_id not in passed_signals:
-                        if mode == "priority":
-                            signal_log.append({
-                                "signal_id": sig_id,
-                                "arrival_s": round(sim_t, 1),
-                                "phase_on_arrival": "green",
-                                "wait_s": 0,
-                                "preempted": 1,
-                            })
-                        passed_signals.add(sig_id)
-                        if mode == "priority":
-                            signal_controller.release_priority(sig_id)
-                    break
-            elif dist_to_signal < -5.0 and sig_id not in passed_signals:
+            colour = signal_controller.get_colour(sig_id, "NS")
+            if 0.0 <= dist_to_signal <= 2.0 and colour.value != "green":
+                at_red = True
+                if waiting_at != sig_id:
+                    waiting_at = sig_id
+                    signal_log.append({
+                        "signal_id": sig_id,
+                        "arrival_s": round(sim_t, 1),
+                        "phase_on_arrival": colour.value,
+                        "wait_s": 0,
+                        "preempted": 1 if mode == "priority" else 0,
+                    })
+                    stops += 1
+                else:
+                    signal_log[-1]["wait_s"] = round(signal_log[-1]["wait_s"] + dt, 1)
+                    total_wait += dt
+                break
+            
+            if dist_to_signal < -1.7:
                 passed_signals.add(sig_id)
+                if mode == "priority":
+                    signal_controller.release_priority(sig_id)
+                if waiting_at == sig_id:
+                    waiting_at = None
 
         # Move
         if not at_red:

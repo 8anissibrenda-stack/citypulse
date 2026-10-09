@@ -81,6 +81,27 @@ def check_ambulance():
         logging.error("Priority timeline missing priority_active for S2 or S3")
         sys.exit(1)
         
+    diff_count = 0
+    for fb, fp in zip(t_base, t_prio):
+        if fb.get("signals") != fp.get("signals"):
+            diff_count += 1
+    if diff_count < 3:
+        logging.error(f"Timelines do not differ enough ({diff_count})")
+        sys.exit(1)
+        
+    for fp in t_prio:
+        frac = fp.get("route_fraction", 0)
+        sigs = fp.get("signals", {})
+        if 0.245 <= frac <= 0.251 and sigs.get("S1") in ["red", "yellow"]:
+            logging.error("Crossed S1 on red/amber in priority")
+            sys.exit(1)
+        if 0.495 <= frac <= 0.501 and sigs.get("S2") in ["red", "yellow"]:
+            logging.error("Crossed S2 on red/amber in priority")
+            sys.exit(1)
+        if 0.745 <= frac <= 0.751 and sigs.get("S3") in ["red", "yellow"]:
+            logging.error("Crossed S3 on red/amber in priority")
+            sys.exit(1)
+        
     logging.info("Ambulance comparison verified")
 
 def check_scenarios():
