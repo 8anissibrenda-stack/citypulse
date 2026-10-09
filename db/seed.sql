@@ -41,8 +41,8 @@ INSERT INTO risk_config (key, value, description) VALUES
 
 INSERT INTO traffic_signals (id, junction_id, code, name, yellow_s, all_red_s, min_green_s, max_preempt_hold, initial_offset_s) VALUES
  (1,1,'S1','Signal J1',3,2,8,30,0),
- (2,2,'S2','Signal J2',3,2,8,30,30),
- (3,3,'S3','Signal J3',3,2,8,30,35);
+ (2,2,'S2','Signal J2',3,2,8,30,48),
+ (3,3,'S3','Signal J3',3,2,8,30,40);
 
 INSERT INTO signal_phases (id, signal_id, phase_order, phase_name, green_approach, duration_s) VALUES
  (1,1,1,'North-South green','NS',25),(2,1,2,'East-West green','EW',20),

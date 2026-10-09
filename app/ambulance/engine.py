@@ -154,172 +154,117 @@ def look_ahead(
 # Simulated ambulance run
 # ---------------------------------------------------------------------------
 
-@dataclass
-class RunResult:
-    """Result of a simulated ambulance run."""
-    mode: str
-    duration_s: float
-    stops_count: int
-    total_wait_s: float
-    signal_log: list[dict]
-    positions: list[dict]  # for live broadcast
+def _build_local_controller(offsets: list[float]) -> SignalController:
+    ctrl = SignalController()
+    for i, sig_id in enumerate([1, 2, 3]):
+        ctrl.add_signal(
+            signal_id=sig_id,
+            phases=[
+                Phase(1, "North-South green", "NS", 25.0),
+                Phase(2, "East-West green", "EW", 20.0),
+            ],
+            yellow_s=3.0,
+            all_red_s=2.0,
+            initial_offset_s=offsets[i],
+        )
+    return ctrl
 
 
-def simulate_run(
-    route_waypoints: list[tuple[float, float]],
-    route_signals: list[dict],  # [{signal_id, seq, approach}]
-    signal_controller: SignalController,
-    mode: str = "baseline",
-    cruise_kmh: float = 40.0,
-    sim_speed: float = 10.0,
-    trigger_distance_m: float = 250.0,
-    on_position: callable = None,
-) -> RunResult:
-    """Simulate an ambulance run along a route.
-
-    In baseline mode, the ambulance stops at red signals.
-    In priority mode, the ambulance requests pre-emption and passes through.
-
-    Args:
-        route_waypoints: Ordered (lat, lon) waypoints.
-        route_signals: Signal definitions on the route.
-        signal_controller: The signal controller instance.
-        mode: 'baseline' or 'priority'.
-        cruise_kmh: Cruising speed.
-        sim_speed: Simulation speed factor.
-        trigger_distance_m: Distance to start looking ahead.
-        on_position: Callback(lat, lon, speed, t) for live updates.
-
-    Returns:
-        RunResult with timing and signal interaction data.
-    """
-    total_dist = route_total_distance(route_waypoints)
-    cruise_mps = cruise_kmh / 3.6
-    dt = 0.1  # simulation step in real seconds
-
-    # Compute signal positions along route
-    # Map junction positions to signals
-    signal_positions: dict[int, float] = {}  # signal_id -> distance along route
-    for rs in route_signals:
-        sig_id = rs["signal_id"]
-        if "lat" in rs and "lon" in rs:
-            along, _ = project_on_route(rs["lat"], rs["lon"], route_waypoints)
-            signal_positions[sig_id] = along
-
-    sim_t = 0.0
-    position_m = 0.0  # distance along route
-    speed = cruise_mps
+def simulate_run(mode: str, offsets: list[float] = None) -> dict:
+    """Simulate an ambulance run pixel-by-pixel for the UI."""
+    if offsets is None:
+        offsets = [0.0, 0.0, 0.0]
+    ctrl = _build_local_controller(offsets)
+    dt = 0.1
+    y = 620.0
+    clock_s = 0.0
     stops = 0
-    total_wait = 0.0
-    signal_log: list[dict] = []
-    positions: list[dict] = []
-    passed_signals: set[int] = set()
-    waiting_at: int | None = None
+    wait_s = 0.0
+    tick_idx = 0
+    was_blocked = False
+    released = set()
+    ticks = []
 
-    # Reset signal controller
-    signal_controller.reset()
+    sig_y = [470, 320, 180]
 
-    while position_m < total_dist:
-        sim_t += dt
-        signal_controller.tick(dt)
+    while True:
+        # 1. advance the signal controllers by dt
+        ctrl.tick(dt)
 
-        # Check signals ahead
+        # 2. (priority mode only) issue/hold/release pre-emption requests
         if mode == "priority":
-            for rs in route_signals:
-                sig_id = rs["signal_id"]
-                if sig_id in passed_signals:
-                    continue
-                sig_pos = signal_positions.get(sig_id, 0)
-                dist_ahead = sig_pos - position_m
-                trigger_distance = (190 / 495) * total_dist
-                if 0 < dist_ahead <= trigger_distance:
-                    eta = dist_ahead / max(speed, 0.1)
-                    signal_controller.request_priority(sig_id, "NS", eta)
+            for i, sy in enumerate(sig_y):
+                sig_id = i + 1
+                dist = y - sy
+                if -40 <= dist <= 400:
+                    ctrl.request_priority(sig_id, "NS", dist / 60.0 if dist > 0 else 0)
+                elif dist < -40 and sig_id not in released:
+                    ctrl.release_priority(sig_id)
+                    released.add(sig_id)
 
-        # Check if at a red signal
-        at_red = False
-        for rs in route_signals:
-            sig_id = rs["signal_id"]
-            if sig_id in passed_signals:
-                continue
-            sig_pos = signal_positions.get(sig_id, 0)
-            dist_to_signal = sig_pos - position_m
+        # 3. decide whether the ambulance may move
+        blocked = False
+        for i, sy in enumerate(sig_y):
+            dist = y - sy
+            if 0 <= dist <= 3.0:
+                if ctrl.get_colour(i + 1, "NS").value != "green":
+                    blocked = True
+                    break
 
-            colour = signal_controller.get_colour(sig_id, "NS")
-            if 0.0 <= dist_to_signal <= 2.0 and colour.value != "green":
-                at_red = True
-                if waiting_at != sig_id:
-                    waiting_at = sig_id
-                    signal_log.append({
-                        "signal_id": sig_id,
-                        "arrival_s": round(sim_t, 1),
-                        "phase_on_arrival": colour.value,
-                        "wait_s": 0,
-                        "preempted": 1 if mode == "priority" else 0,
-                    })
-                    stops += 1
-                else:
-                    signal_log[-1]["wait_s"] = round(signal_log[-1]["wait_s"] + dt, 1)
-                    total_wait += dt
-                break
-            
-            if dist_to_signal < -1.7:
-                passed_signals.add(sig_id)
-                if mode == "priority":
-                    signal_controller.release_priority(sig_id)
-                if waiting_at == sig_id:
-                    waiting_at = None
-
-        # Move
-        if not at_red:
-            speed = cruise_mps
-            position_m += speed * dt
-            waiting_at = None
+        # 4. move the ambulance unless blocked
+        if not blocked:
+            y -= 60.0 * dt
         else:
-            speed = 0
+            if not was_blocked:
+                stops += 1
+            wait_s += dt
+        was_blocked = blocked
+        clock_s += dt
 
-        # Position on the route for broadcast
-        frac = min(position_m / total_dist, 1.0)
-        # Simple linear interpolation along waypoints
-        cum = 0.0
-        lat, lon = route_waypoints[0]
-        for i in range(len(route_waypoints) - 1):
-            seg = haversine(*route_waypoints[i], *route_waypoints[i + 1])
-            if cum + seg >= position_m:
-                seg_frac = (position_m - cum) / seg if seg > 0 else 0
-                lat, lon = interpolate(*route_waypoints[i], *route_waypoints[i + 1], seg_frac)
-                break
-            cum += seg
-        else:
-            lat, lon = route_waypoints[-1]
+        # 5. append ONE snapshot
+        route_fraction = 1.0 - ((y - 125.0) / (620.0 - 125.0))
+        signals = []
+        priority_active = []
+        for i in range(3):
+            val = ctrl.get_colour(i + 1, "NS").value
+            signals.append("amber" if val == "yellow" else val)
+            priority_active.append(ctrl._signals[i + 1].preempt_active)
 
-        signals_state = {}
-        priority_state = {}
-        for sig_id in signal_controller._signals:
-            key = f"S{sig_id}"
-            st = signal_controller.get_state(sig_id)
-            signals_state[key] = st["ns_colour"]
-            priority_state[key] = st["preempt_active"] and st["preempt_approach"] == "NS"
-
-        pos_entry = {
-            "lat": round(lat, 6),
-            "lon": round(lon, 6),
-            "speed_kmh": round(speed * 3.6, 1),
-            "t": round(sim_t, 1),
-            "route_distance_m": position_m,
-            "signals": signals_state,
-            "priority_active": priority_state,
+        done = (y <= 125.0)
+        snapshot = {
+            "i": tick_idx,
+            "t": round(clock_s, 1),
+            "y_px": round(y, 1),
+            "route_fraction": round(max(0.0, min(1.0, route_fraction)), 3),
+            "signals": signals,
+            "priority_active": priority_active,
+            "blocked": blocked,
+            "stops": stops,
+            "wait_s": round(wait_s, 1),
+            "clock_s": round(clock_s, 1),
+            "done": done
         }
-        positions.append(pos_entry)
+        ticks.append(snapshot)
 
-        if on_position:
-            on_position(lat, lon, speed * 3.6, sim_t)
+        if done:
+            break
+        tick_idx += 1
 
-    return RunResult(
-        mode=mode,
-        duration_s=round(sim_t, 1),
-        stops_count=stops,
-        total_wait_s=round(total_wait, 1),
-        signal_log=signal_log,
-        positions=positions,
-    )
+    # Assert rules
+    for tick in ticks:
+        if mode == "baseline":
+            assert not any(tick["priority_active"]), "Baseline has pre-emption!"
+        
+        # ambulance is never past a signal's stop line while that signal's NS state is red or amber
+        for i, sy in enumerate(sig_y):
+            if (sy - 40) <= tick["y_px"] < sy:
+                assert tick["signals"][i] == "green", f"Crossed signal {i+1} on red/amber!"
+
+    return {
+        "ticks": ticks,
+        "summary": {
+            "duration_s": round(clock_s, 1),
+            "stops": stops,
+            "wait_s": round(wait_s, 1)
+        }
+    }

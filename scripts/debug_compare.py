@@ -1,66 +1,29 @@
-import os
 import sys
+import requests
 
-# Add project root to sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from app.routers.scenarios import _build_signal_controller
-from app.ambulance.engine import simulate_run
-from app import db
-import json
-
-def run_debug():
-    # Setup test params based on scenario 2 (ambulance)
-    # Using route_id 1
-    route_id = 1
+def run():
+    r = requests.post("http://127.0.0.1:8000/api/ambulance/compare")
+    if r.status_code != 200:
+        print(f"Error: {r.status_code} {r.text}")
+        return
+    data = r.json()
+    b_ticks = data["baseline"]["ticks"]
+    p_ticks = data["priority"]["ticks"]
     
-    waypoints_raw = db.query_all(
-        "SELECT lat, lon FROM route_waypoints WHERE route_id = ? ORDER BY seq", (route_id,)
-    )
-    waypoints = [(w["lat"], w["lon"]) for w in waypoints_raw]
-    route_signals = db.query_all(
-        """SELECT rs.signal_id, rs.seq, rs.approach, j.lat, j.lon
-           FROM route_signals rs
-           JOIN traffic_signals ts ON ts.id = rs.signal_id
-           JOIN junctions j ON j.id = ts.junction_id
-           WHERE rs.route_id = ? ORDER BY rs.seq""",
-        (route_id,),
-    )
-    
-    cruise_kmh = float(db.query_one("SELECT value FROM system_settings WHERE key='ambulance_cruise_kmh'")["value"])
-    trigger_dist = float(db.query_one("SELECT value FROM system_settings WHERE key='priority_trigger_distance_m'")["value"])
-
-    ctrl_b = _build_signal_controller()
-    baseline = simulate_run(
-        route_waypoints=waypoints,
-        route_signals=route_signals,
-        signal_controller=ctrl_b,
-        mode="baseline",
-        cruise_kmh=cruise_kmh,
-        sim_speed=10,
-        trigger_distance_m=trigger_dist,
-    )
-    
-    ctrl_p = _build_signal_controller()
-    priority = simulate_run(
-        route_waypoints=waypoints,
-        route_signals=route_signals,
-        signal_controller=ctrl_p,
-        mode="priority",
-        cruise_kmh=cruise_kmh,
-        sim_speed=10,
-        trigger_distance_m=trigger_dist,
-    )
-
-    print("\n--- BASELINE TIMELINE ---")
-    for p in baseline.positions:
-        if p["t"] % 1.0 == 0.0 or p == baseline.positions[-1]:
-            print(f"t={p['t']:5.1f} frac={p['route_fraction']:.2f} S1={p['signals'].get('S1')} S2={p['signals'].get('S2')} S3={p['signals'].get('S3')}")
-
-    print("\n--- PRIORITY TIMELINE ---")
-    for p in priority.positions:
-        if p["t"] % 1.0 == 0.0 or p == priority.positions[-1]:
-            print(f"t={p['t']:5.1f} frac={p['route_fraction']:.2f} S1={p['signals'].get('S1')} S2={p['signals'].get('S2')} S3={p['signals'].get('S3')} PriS2={p['priority_active'].get('S2')} PriS3={p['priority_active'].get('S3')}")
+    print("t | BASE y / S1 S2 S3 / blocked | PRIO y / S1 S2 S3 / ring")
+    print("-" * 65)
+    for i in range(0, max(len(b_ticks), len(p_ticks)), 10):
+        b = b_ticks[i] if i < len(b_ticks) else b_ticks[-1]
+        p = p_ticks[i] if i < len(p_ticks) else p_ticks[-1]
+        
+        b_sigs = f"{b['signals'][0][0].upper()}{b['signals'][1][0].upper()}{b['signals'][2][0].upper()}"
+        p_sigs = f"{p['signals'][0][0].upper()}{p['signals'][1][0].upper()}{p['signals'][2][0].upper()}"
+        
+        p_ring = "".join(["1" if x else "0" for x in p["priority_active"]])
+        
+        print(f"{b['t']:4.1f} | "
+              f"{b['y_px']:5.1f} / {b_sigs} / {str(b['blocked'])[0]:1}       | "
+              f"{p['y_px']:5.1f} / {p_sigs} / {p_ring}")
 
 if __name__ == "__main__":
-    run_debug()
+    run()

@@ -25,34 +25,16 @@ def test_project_on_route():
 
 def test_simulate_priority_is_faster():
     """Priority run should be faster and have fewer stops than baseline."""
-    # Setup route (approx 1.1km)
-    waypoints = [
-        (20.000, 78.0),
-        (20.010, 78.0) 
-    ]
-    route_signals = [
-        {"signal_id": 1, "seq": 1, "approach": "NS", "lat": 20.005, "lon": 78.0}
-    ]
+    offsets = [0.0, 48.0, 40.0]
     
-    # Setup controller
-    ctrl = SignalController()
-    phases = [
-        Phase(1, "NS Green", "NS", 10),
-        Phase(2, "EW Green", "EW", 40)
-    ]
-    # At t=50s (arrival time), NS will be red if offset=0
-    ctrl.add_signal(1, phases, initial_offset_s=0) 
+    baseline = simulate_run("baseline", offsets)
+    priority = simulate_run("priority", offsets)
     
-    baseline = simulate_run(
-        waypoints, route_signals, ctrl, 
-        mode="baseline", cruise_kmh=40, sim_speed=10, trigger_distance_m=250
-    )
+    b_dur = baseline["summary"]["duration_s"]
+    p_dur = priority["summary"]["duration_s"]
+    b_stops = baseline["summary"]["stops"]
+    p_stops = priority["summary"]["stops"]
     
-    priority = simulate_run(
-        waypoints, route_signals, ctrl, 
-        mode="priority", cruise_kmh=40, sim_speed=10, trigger_distance_m=250
-    )
-    
-    assert priority.duration_s < baseline.duration_s
-    assert priority.stops_count <= baseline.stops_count
-    assert priority.stops_count == 0
+    assert p_dur < b_dur
+    assert p_stops <= b_stops
+    assert p_stops == 0

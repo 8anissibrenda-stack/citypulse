@@ -297,11 +297,20 @@ function runAmbulance(mode) {
             updateAmbulanceChart(data.summary);
             let startT = performance.now();
             function animate(time) {
-                // ~10x compression: 1 simulated second = 100ms real time
-                let elapsedSim = (time - startT) / 100; 
+                // ~10x compression: 1 real second = 10 sim seconds
+                let elapsedSim = (time - startT) / 100;
                 
-                let baseDone = updateAmbulancePanel('base', data.baseline, elapsedSim);
-                let prioDone = updateAmbulancePanel('prio', data.priority, elapsedSim);
+                let baseTicks = data.baseline.ticks || [];
+                let prioTicks = data.priority.ticks || [];
+                let maxTicks = Math.max(baseTicks.length, prioTicks.length);
+                
+                let tick = Math.floor(elapsedSim / 0.1);
+                
+                let bTick = Math.min(baseTicks.length > 0 ? baseTicks.length - 1 : 0, tick);
+                let pTick = Math.min(prioTicks.length > 0 ? prioTicks.length - 1 : 0, tick);
+                
+                let baseDone = updateAmbulancePanel('base', baseTicks[bTick], elapsedSim);
+                let prioDone = updateAmbulancePanel('prio', prioTicks[pTick], elapsedSim);
                 
                 if (mode === 'compare' && baseDone && prioDone) {
                     showAmbulanceOverlay(data.summary);
@@ -318,47 +327,33 @@ function runAmbulance(mode) {
         });
 }
 
-function updateAmbulancePanel(prefix, timeline, elapsedSim) {
-    if (!timeline || timeline.length === 0) return true;
+function updateAmbulancePanel(prefix, frame, elapsedSim) {
+    if (!frame) return true;
     
-    // Find closest frame
-    let frame = timeline[timeline.length - 1];
-    let done = true;
-    for (let i = 0; i < timeline.length; i++) {
-        if (timeline[i].clock_s >= elapsedSim) {
-            frame = timeline[i];
-            done = false;
-            break;
-        }
-    }
+    let y = frame.y_px;
+    document.getElementById(`amb-${prefix}`).setAttribute('transform', `translate(294, ${y})`);
     
-    if (frame) {
-        let y = 620 - frame.route_fraction * (620 - 125);
-        document.getElementById(`amb-${prefix}`).setAttribute('transform', `translate(294, ${y})`);
+    [1,2,3].forEach(i => {
+        const state = frame.signals[i-1];
+        document.getElementById(`${prefix}-s${i}`).setAttribute('fill', sigColor(state));
         
-        [1,2,3].forEach(i => {
-            const state = frame.signals[`S${i}`];
-            console.log(`[Timeline] Signal S${i} state:`, state);
-            document.getElementById(`${prefix}-s${i}`).setAttribute('fill', sigColor(state));
-            
-            if (prefix === 'prio') {
-                const isPrio = frame.priority_active[`S${i}`];
-                document.getElementById(`prio-ring-s${i}`).setAttribute('opacity', isPrio ? '1' : '0');
-                document.getElementById(`prio-text-s${i}`).setAttribute('opacity', isPrio ? '1' : '0');
-            }
-        });
-        
-        document.getElementById(`stat-${prefix}-stops`).textContent = `Red-light stops: ${frame.stops}`;
-        document.getElementById(`stat-${prefix}-wait`).textContent = `Waiting: ${frame.wait_s.toFixed(1)} s`;
-        
-        if (done) {
-            document.getElementById(`arr-${prefix}`).setAttribute('opacity', '1');
-            document.getElementById(`stat-${prefix}-time`).textContent = `Journey time: ${frame.clock_s.toFixed(1)} s`;
-        } else {
-            document.getElementById(`stat-${prefix}-time`).textContent = `Journey time: ${elapsedSim.toFixed(1)} s`;
+        if (prefix === 'prio') {
+            const isPrio = frame.priority_active[i-1];
+            document.getElementById(`prio-ring-s${i}`).setAttribute('opacity', isPrio ? '1' : '0');
+            document.getElementById(`prio-text-s${i}`).setAttribute('opacity', isPrio ? '1' : '0');
         }
+    });
+    
+    document.getElementById(`stat-${prefix}-stops`).textContent = `Red-light stops: ${frame.stops}`;
+    document.getElementById(`stat-${prefix}-wait`).textContent = `Waiting: ${frame.wait_s.toFixed(1)} s`;
+    
+    if (frame.done) {
+        document.getElementById(`arr-${prefix}`).setAttribute('opacity', '1');
+        document.getElementById(`stat-${prefix}-time`).textContent = `Journey time: ${frame.clock_s.toFixed(1)} s`;
+    } else {
+        document.getElementById(`stat-${prefix}-time`).textContent = `Journey time: ${elapsedSim.toFixed(1)} s`;
     }
-    return done;
+    return frame.done;
 }
 
 function showAmbulanceOverlay(summary) {

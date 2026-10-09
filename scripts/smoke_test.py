@@ -56,14 +56,14 @@ def check_ambulance():
         logging.error("Baseline stops is less than 2")
         sys.exit(1)
 
-    t_base = data.get("baseline", [])
-    t_prio = data.get("priority", [])
+    t_base = data.get("baseline", {}).get("ticks", [])
+    t_prio = data.get("priority", {}).get("ticks", [])
     
     s2_red_amber = False
     s3_red_amber = False
     for frame in t_base:
-        s2 = frame.get("signals", {}).get("S2")
-        s3 = frame.get("signals", {}).get("S3")
+        s2 = frame.get("signals", ["", "", ""])[1]
+        s3 = frame.get("signals", ["", "", ""])[2]
         if s2 in ["red", "yellow"]: s2_red_amber = True
         if s3 in ["red", "yellow"]: s3_red_amber = True
 
@@ -74,8 +74,9 @@ def check_ambulance():
     s2_prio = False
     s3_prio = False
     for frame in t_prio:
-        if frame.get("priority_active", {}).get("S2"): s2_prio = True
-        if frame.get("priority_active", {}).get("S3"): s3_prio = True
+        pa = frame.get("priority_active", [False, False, False])
+        if pa[1]: s2_prio = True
+        if pa[2]: s3_prio = True
 
     if not s2_prio or not s3_prio:
         logging.error("Priority timeline missing priority_active for S2 or S3")
@@ -89,19 +90,18 @@ def check_ambulance():
         logging.error(f"Timelines do not differ enough ({diff_count})")
         sys.exit(1)
         
-    for fp in t_prio:
-        frac = fp.get("route_fraction", 0)
-        sigs = fp.get("signals", {})
-        if 0.245 <= frac <= 0.251 and sigs.get("S1") in ["red", "yellow"]:
-            logging.error("Crossed S1 on red/amber in priority")
-            sys.exit(1)
-        if 0.495 <= frac <= 0.501 and sigs.get("S2") in ["red", "yellow"]:
-            logging.error("Crossed S2 on red/amber in priority")
-            sys.exit(1)
-        if 0.745 <= frac <= 0.751 and sigs.get("S3") in ["red", "yellow"]:
-            logging.error("Crossed S3 on red/amber in priority")
-            sys.exit(1)
-        
+    # Enforce rules on every tick
+    for frame in t_base:
+        assert not any(frame["priority_active"]), "Baseline has pre-emption!"
+        for i, sy in enumerate([470, 320, 180]):
+            if (sy - 40) <= frame["y_px"] < sy:
+                assert frame["signals"][i] == "green", f"Crossed signal S{i+1} on red/amber in baseline!"
+
+    for frame in t_prio:
+        for i, sy in enumerate([470, 320, 180]):
+            if (sy - 40) <= frame["y_px"] < sy:
+                assert frame["signals"][i] == "green", f"Crossed signal S{i+1} on red/amber in priority!"
+                
     logging.info("Ambulance comparison verified")
 
 def check_scenarios():

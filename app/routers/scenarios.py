@@ -180,34 +180,23 @@ def run_ambulance_scenario(scenario: dict) -> dict:
     start_time = time.monotonic()
 
     # Run baseline
-    ctrl_b = _build_signal_controller()
-    baseline = simulate_run(
-        route_waypoints=waypoints,
-        route_signals=route_signals,
-        signal_controller=ctrl_b,
-        mode="baseline",
-        cruise_kmh=cruise_kmh,
-        sim_speed=params.get("sim_speed", 10),
-        trigger_distance_m=trigger_dist,
-    )
-
-    # Run priority
-    ctrl_p = _build_signal_controller()
-    priority = simulate_run(
-        route_waypoints=waypoints,
-        route_signals=route_signals,
-        signal_controller=ctrl_p,
-        mode="priority",
-        cruise_kmh=cruise_kmh,
-        sim_speed=params.get("sim_speed", 10),
-        trigger_distance_m=trigger_dist,
-    )
+    offsets = [s["initial_offset_s"] for s in db.query_all("SELECT initial_offset_s FROM traffic_signals ORDER BY id")]
+    if len(offsets) < 3:
+        offsets = [0.0, 48.0, 40.0]
+        
+    baseline = simulate_run("baseline", offsets)
+    priority = simulate_run("priority", offsets)
 
     elapsed_ms = (time.monotonic() - start_time) * 1000
+    
+    b_dur = baseline["summary"]["duration_s"]
+    p_dur = priority["summary"]["duration_s"]
+    b_stops = baseline["summary"]["stops"]
+    p_stops = priority["summary"]["stops"]
 
     passed = (
-        priority.stops_count <= max_stops
-        and priority.duration_s < baseline.duration_s
+        p_stops <= max_stops
+        and p_dur < b_dur
     )
 
     return {
@@ -218,8 +207,8 @@ def run_ambulance_scenario(scenario: dict) -> dict:
         "response_ms": round(elapsed_ms, 1),
         "passed": passed,
         "notes": (
-            f"Baseline: {baseline.duration_s}s/{baseline.stops_count} stops, "
-            f"Priority: {priority.duration_s}s/{priority.stops_count} stops"
+            f"Baseline: {b_dur}s/{b_stops} stops, "
+            f"Priority: {p_dur}s/{p_stops} stops"
         ),
     }
 
