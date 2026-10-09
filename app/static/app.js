@@ -58,7 +58,11 @@ function switchTab(tabId) {
 
 function startPipeline() {
     currentMode = document.getElementById('mode-select').value;
-    fetch(`/api/pipeline/start?mode=${currentMode}`, { method: 'POST' })
+    fetch(`/api/pipeline/start`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_id: 1, mode: currentMode })
+    })
         .then(res => res.json())
         .then(data => {
             isRunning = true;

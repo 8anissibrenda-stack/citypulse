@@ -152,6 +152,7 @@ select {
   align-items: center;
   border-radius: 8px;
   font-weight: bold;
+  border: 4px solid transparent;
   transition: all 0.1s;
 }
 .driver-display.clear {
