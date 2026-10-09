@@ -279,6 +279,11 @@ let ambAnimId = null;
 function runAmbulance(mode) {
     if (ambAnimId) cancelAnimationFrame(ambAnimId);
     
+    document.getElementById('panel-base').classList.remove('dimmed');
+    document.getElementById('panel-prio').classList.remove('dimmed');
+    if (mode === 'baseline') document.getElementById('panel-prio').classList.add('dimmed');
+    if (mode === 'priority') document.getElementById('panel-base').classList.add('dimmed');
+    
     // Reset visuals
     ['base', 'prio'].forEach(prefix => {
         document.getElementById(`amb-${prefix}`).setAttribute('transform', 'translate(294, 620)');

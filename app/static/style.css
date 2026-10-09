@@ -218,7 +218,9 @@ select {
   background: var(--amb-bg);
   border-radius: 8px;
   position: relative;
+  transition: opacity 0.3s;
 }
+.amb-panel.dimmed { opacity: 0.3; pointer-events: none; }
 .amb-panel-title {
   position: absolute;
   top: 20px; left: 20px;
