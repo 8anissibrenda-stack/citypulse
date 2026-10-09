@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+
+# Data (keep .gitkeep)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.mp4
+data/*.avi
+data/snapshots/
+
+# YOLO weights
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db

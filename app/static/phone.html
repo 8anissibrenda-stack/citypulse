@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CityPulse | Ambulance GPS</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { padding: 2rem; max-width: 600px; margin: 0 auto; }
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: rgba(255,0,0,0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(255,0,0,0.3);
+        }
+        .toggle-switch input {
+            width: 24px;
+            height: 24px;
+        }
+        .toggle-switch label {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #ff5252;
+            cursor: pointer;
+        }
+        #status-log {
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            padding: 1rem;
+            border-radius: 4px;
+            height: 200px;
+            overflow-y: auto;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="card-header bg-primary">
+            <h2>Ambulance GPS Sender</h2>
+        </div>
+        <div class="card-body">
+            <p class="text-muted">Requires HTTPS or localhost for Geolocation API.</p>
+            
+            <div class="toggle-switch">
+                <input type="checkbox" id="emergency-toggle">
+                <label for="emergency-toggle">EMERGENCY ACTIVE (Pre-emption)</label>
+            </div>
+            
+            <button id="btn-start" class="primary" style="width: 100%; font-size: 1.2rem; padding: 1rem;">
+                Start Sharing Location
+            </button>
+            <button id="btn-stop" class="danger" style="width: 100%; font-size: 1.2rem; padding: 1rem; display: none;">
+                Stop Sharing
+            </button>
+            
+            <div id="status-log">Ready.</div>
+        </div>
+    </div>
+
+    <script>
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const emergencyToggle = document.getElementById('emergency-toggle');
+        const log = document.getElementById('status-log');
+        
+        let watchId = null;
+        let lastLat = null;
+        let lastLon = null;
+        let lastTime = null;
+
+        function addLog(msg) {
+            log.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        async function sendLocation(position) {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            let speedKmh = 0;
+            let headingDeg = position.coords.heading || 0;
+            const time = position.timestamp;
+
+            // Calculate speed if the API doesn't provide it
+            if (position.coords.speed !== null) {
+                speedKmh = position.coords.speed * 3.6;
+            } else if (lastLat !== null && lastTime !== null) {
+                // Haversine approx
+                const R = 6371; // km
+                const dLat = (lat - lastLat) * Math.PI / 180;
+                const dLon = (lon - lastLon) * Math.PI / 180;
+                const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                          Math.cos(lastLat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) *
+                          Math.sin(dLon/2) * Math.sin(dLon/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                const d = R * c; // Distance in km
+                const dt = (time - lastTime) / 3600000; // Time in hours
+                if (dt > 0) speedKmh = d / dt;
+            }
+
+            lastLat = lat;
+            lastLon = lon;
+            lastTime = time;
+
+            const payload = {
+                ambulance_id: 1, // AMB-01
+                lat: lat,
+                lon: lon,
+                speed_kmh: speedKmh,
+                heading_deg: headingDeg,
+                emergency: emergencyToggle.checked
+            };
+
+            try {
+                const res = await fetch('/api/ambulance/gps', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    addLog(`Sent: ${lat.toFixed(5)}, ${lon.toFixed(5)} | ${speedKmh.toFixed(1)} km/h | Emg: ${payload.emergency}`);
+                } else {
+                    addLog(`Error sending: ${res.status}`);
+                }
+            } catch (err) {
+                addLog(`Network error: ${err.message}`);
+            }
+        }
+
+        function errHandler(err) {
+            addLog(`Geolocation error (${err.code}): ${err.message}`);
+        }
+
+        btnStart.addEventListener('click', () => {
+            if (!navigator.geolocation) {
+                addLog('Geolocation not supported by this browser.');
+                return;
+            }
+            
+            addLog('Requesting location permission...');
+            watchId = navigator.geolocation.watchPosition(sendLocation, errHandler, {
+                enableHighAccuracy: true,
+                maximumAge: 0,
+                timeout: 5000
+            });
+            
+            btnStart.style.display = 'none';
+            btnStop.style.display = 'block';
+            addLog('Started watching position.');
+        });
+
+        btnStop.addEventListener('click', () => {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            btnStart.style.display = 'block';
+            btnStop.style.display = 'none';
+            addLog('Stopped watching position.');
+        });
+    </script>
+</body>
+</html>

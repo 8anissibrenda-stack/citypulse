@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CityPulse | Urban Road Safety & Mobility</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-title">
+                <h1>CityPulse</h1>
+                <span class="badge">Team BreakX</span>
+                <span class="badge">Zéphyr 2026 AI Hackathon</span>
+            </div>
+            
+            <div class="controls">
+                <select id="mode-select">
+                    <option value="simulator">Simulator (Default)</option>
+                    <option value="video">Video File / Camera</option>
+                </select>
+                <button id="btn-start" class="success">Start Pipeline</button>
+                <button id="btn-stop" class="danger" style="display:none;">Stop Pipeline</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Column: Video & Metrics -->
+            <div class="left-col">
+                <!-- Video Panel -->
+                <div class="card mb-1">
+                    <div class="card-header">
+                        <h3>Live Feed: <span id="camera-name">Junction Simulator</span></h3>
+                        <div id="pipeline-status" class="badge">STOPPED</div>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div class="video-container">
+                            <span class="video-overlay-text" id="video-placeholder">Pipeline is stopped. Click Start.</span>
+                            <img id="video-stream" src="" alt="Video Stream" style="display:none;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Metrics Grid -->
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Warnings Today</div>
+                        <div class="metric-value text-warning" id="metric-warnings">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Critical Alerts Today</div>
+                        <div class="metric-value text-critical" id="metric-criticals">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Near Misses</div>
+                        <div class="metric-value text-near-miss" id="metric-nearmiss">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-label">Response Time (P95)</div>
+                        <div class="metric-value" id="metric-latency">0 ms</div>
+                    </div>
+                </div>
+                
+                <!-- Hotspots & Scenarios Row -->
+                <div class="metrics-grid">
+                    <div class="card" style="grid-column: span 1;">
+                        <div class="card-header">
+                            <h3>Risk Hotspots</h3>
+                        </div>
+                        <div class="card-body">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Zone</th>
+                                        <th>Events</th>
+                                        <th>Avg TTC</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="hotspots-body">
+                                    <!-- Populated by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <div class="card" style="grid-column: span 1;">
+                        <div class="card-header">
+                            <h3>Validation Scenarios</h3>
+                            <button id="btn-run-all" class="primary" style="padding: 2px 8px; font-size: 0.8rem;">Run All</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="scenario-list" id="scenario-list">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Map, Ambulance, Alerts -->
+            <div class="right-col">
+                <!-- Map Panel -->
+                <div class="card mb-1">
+                    <div class="card-header">
+                        <h3>City Map</h3>
+                    </div>
+                    <div class="card-body" style="padding: 0;">
+                        <div id="map"></div>
+                    </div>
+                </div>
+
+                <!-- Ambulance Controls -->
+                <div class="card mb-1">
+                    <div class="card-header">
+                        <h3>Ambulance Flow</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="amb-controls">
+                            <button id="btn-sim-baseline" class="primary">Run Baseline</button>
+                            <button id="btn-sim-priority" class="success">Run with Priority</button>
+                            <button id="btn-compare" class="primary">Compare Both</button>
+                        </div>
+                        <div id="amb-status" class="text-muted mb-1" style="font-size: 0.9rem;">Idle</div>
+                        
+                        <!-- Chart container -->
+                        <div style="height: 150px; width: 100%;">
+                            <canvas id="ambChart"></canvas>
+                        </div>
+                        <div id="amb-saved" class="text-success mt-1" style="text-align: center; font-weight: bold; display: none;">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Alerts -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Live Alerts</h3>
+                    </div>
+                    <div class="card-body" style="padding: 0.5rem;">
+                        <div class="alert-feed" id="alert-feed">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Settings Panel (Collapsible) -->
+                <div class="card mt-1">
+                    <div class="card-header">
+                        <h3>Risk Settings</h3>
+                    </div>
+                    <div class="card-body settings-panel">
+                        <div class="setting-row">
+                            <span>Warning TTC (s)</span>
+                            <span id="val-ttc-warn">3.0</span>
+                            <input type="range" id="set-ttc-warn" min="1.0" max="6.0" step="0.1" value="3.0">
+                        </div>
+                        <div class="setting-row">
+                            <span>Critical TTC (s)</span>
+                            <span id="val-ttc-crit">1.5</span>
+                            <input type="range" id="set-ttc-crit" min="0.5" max="3.0" step="0.1" value="1.5">
+                        </div>
+                        <button id="btn-save-settings" class="primary mt-1" style="width: 100%;">Apply</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>

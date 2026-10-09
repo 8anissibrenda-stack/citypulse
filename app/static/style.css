@@ -1,0 +1,422 @@
+"""CSS styles for CityPulse frontend."""
+
+:root {
+  --bg-dark: #121212;
+  --bg-card: #1e1e1e;
+  --bg-card-hover: #2d2d2d;
+  --text-main: #ffffff;
+  --text-muted: #aaaaaa;
+  
+  --color-primary: #2196F3;
+  --color-success: #4CAF50;
+  --color-warning: #FF9800;
+  --color-critical: #F44336;
+  --color-near-miss: #9C27B0;
+  
+  --glass-bg: rgba(30, 30, 30, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  
+  --font-family: 'Inter', sans-serif;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4 {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+/* Layout */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header-title h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  background: linear-gradient(90deg, #2196F3, #00BCD4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.badge {
+  background-color: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.main-content {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: 1rem;
+  padding: 1rem;
+  flex: 1;
+}
+
+/* Cards */
+.card {
+  background-color: var(--bg-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--glass-border);
+  background-color: rgba(0, 0, 0, 0.2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.card-body {
+  padding: 1rem;
+  flex: 1;
+}
+
+/* Video Feed */
+.video-container {
+  width: 100%;
+  background-color: #000;
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  aspect-ratio: 16/9;
+}
+
+.video-container img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.video-overlay-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--text-muted);
+}
+
+/* Alert Feed */
+.alert-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.alert-item {
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid;
+  background-color: rgba(255, 255, 255, 0.05);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.alert-item.critical {
+  border-color: var(--color-critical);
+  background-color: rgba(244, 67, 54, 0.1);
+}
+
+.alert-item.warning {
+  border-color: var(--color-warning);
+  background-color: rgba(255, 152, 0, 0.1);
+}
+
+.alert-item.near_miss {
+  border-color: var(--color-near-miss);
+  background-color: rgba(156, 39, 176, 0.1);
+}
+
+.alert-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.alert-details {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.alert-critical-flash {
+  animation: flash 1s infinite alternate;
+}
+
+@keyframes flash {
+  from { background-color: rgba(244, 67, 54, 0.1); }
+  to { background-color: rgba(244, 67, 54, 0.4); }
+}
+
+/* Map */
+#map {
+  height: 300px;
+  width: 100%;
+  border-radius: var(--radius-md);
+  z-index: 1;
+}
+
+/* Grid Layouts for lower section */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.metric-card {
+  background-color: var(--bg-card);
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  text-align: center;
+}
+
+.metric-value {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0.5rem 0;
+}
+
+.metric-label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Forms & Buttons */
+select, button, input {
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+select {
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  border: 1px solid var(--glass-border);
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+button {
+  background-color: var(--glass-bg);
+  color: var(--text-main);
+  border: 1px solid var(--glass-border);
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+button:hover {
+  background-color: var(--bg-card-hover);
+}
+
+button.primary {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+button.primary:hover {
+  background-color: #1976D2;
+}
+
+button.success {
+  background-color: var(--color-success);
+  border-color: var(--color-success);
+  color: white;
+}
+
+button.danger {
+  background-color: var(--color-critical);
+  border-color: var(--color-critical);
+  color: white;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th, td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Scenarios */
+.scenario-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scenario-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-sm);
+}
+
+.scenario-info {
+  flex: 1;
+}
+
+.scenario-name {
+  font-weight: 600;
+}
+
+.scenario-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.status-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.status-pass { background-color: rgba(76, 175, 80, 0.2); color: #81C784; }
+.status-fail { background-color: rgba(244, 67, 54, 0.2); color: #E57373; }
+.status-pending { background-color: rgba(255, 255, 255, 0.1); color: #ccc; }
+
+/* Utilities */
+.text-critical { color: var(--color-critical); }
+.text-warning { color: var(--color-warning); }
+.text-success { color: var(--color-success); }
+.text-muted { color: var(--text-muted); }
+.mt-1 { margin-top: 1rem; }
+.mb-1 { margin-bottom: 1rem; }
+.flex-row { display: flex; gap: 1rem; align-items: center; }
+
+/* Demo data label */
+.demo-label {
+  font-size: 0.7rem;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+}
+
+/* Ambulance controls */
+.amb-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+/* Settings */
+.settings-panel {
+  padding: 1rem;
+}
+
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  align-items: center;
+}
+
+.setting-row input[type="range"] {
+  width: 150px;
+}
+
+/* Warning Display Specific */
+.warning-display {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  text-align: center;
+  transition: background-color 0.3s;
+}
+
+.warning-display h1 {
+  font-size: 6vw;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.warning-display h2 {
+  font-size: 3vw;
+  margin: 1rem 0 0 0;
+}
+
+.bg-green { background-color: #1b5e20; }
+.bg-amber { background-color: #f57f17; }
+.bg-red { background-color: #b71c1c; }
+.bg-blue { background-color: #0d47a1; }

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CityPulse | Driver Warning Display</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { overflow: hidden; }
+        .emergency-banner {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #0d47a1;
+            color: white;
+            text-align: center;
+            padding: 1rem;
+            font-size: 2vw;
+            display: none;
+            animation: slideUp 0.5s ease-out;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="display-container" class="warning-display bg-green">
+        <h1 id="main-text">ROAD CLEAR</h1>
+        <h2 id="sub-text"></h2>
+    </div>
+    
+    <div id="emergency-banner" class="emergency-banner">
+        EMERGENCY VEHICLE APPROACHING – GIVE WAY
+    </div>
+
+    <script>
+        const container = document.getElementById('display-container');
+        const mainText = document.getElementById('main-text');
+        const subText = document.getElementById('sub-text');
+        const emergencyBanner = document.getElementById('emergency-banner');
+        
+        let activeLevel = 0; // 0=clear, 1=warning, 2=critical
+        let clearTimer = null;
+        
+        function setDisplay(level, text, sub) {
+            activeLevel = level;
+            container.className = 'warning-display';
+            mainText.innerText = text;
+            subText.innerText = sub || '';
+            
+            if (level === 0) {
+                container.classList.add('bg-green');
+            } else if (level === 1) {
+                container.classList.add('bg-amber');
+            } else if (level === 2) {
+                container.classList.add('bg-red');
+                container.classList.add('alert-critical-flash');
+            }
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            const ws = new WebSocket(wsUrl);
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'alert') {
+                    // Update display based on severity
+                    const newLevel = data.severity === 3 ? 2 : 1;
+                    if (newLevel >= activeLevel) {
+                        const text = newLevel === 2 ? "SLOW DOWN" : "CAUTION";
+                        const sub = newLevel === 2 ? "PEDESTRIAN/CYCLIST CROSSING" : "PEDESTRIAN AHEAD";
+                        setDisplay(newLevel, text, sub);
+                        
+                        // Clear any existing timer
+                        if (clearTimer) clearTimeout(clearTimer);
+                    }
+                } else if (data.type === 'alert_clear') {
+                    // Clear the warning after 3 seconds
+                    if (clearTimer) clearTimeout(clearTimer);
+                    clearTimer = setTimeout(() => {
+                        setDisplay(0, "ROAD CLEAR", "");
+                    }, 3000);
+                } else if (data.type === 'signal_update') {
+                    // Check for pre-emption
+                    if (data.state && data.state.signal_id === 2) { // Assuming J2 is signal 2
+                        if (data.state.preempt_active) {
+                            emergencyBanner.style.display = 'block';
+                        } else {
+                            emergencyBanner.style.display = 'none';
+                        }
+                    }
+                }
+            };
+
+            ws.onclose = () => {
+                setTimeout(connectWebSocket, 2000); // Reconnect
+            };
+        }
+
+        connectWebSocket();
+    </script>
+</body>
+</html>
