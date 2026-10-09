@@ -275,8 +275,10 @@ function updateUI(data) {
 
 // Ambulance Flow
 let ambAnimId = null;
+let isFetchingAmb = false;
 
 function runAmbulance(mode) {
+    if (isFetchingAmb) return;
     if (ambAnimId) cancelAnimationFrame(ambAnimId);
     
     document.getElementById('panel-base').classList.remove('dimmed');
@@ -300,12 +302,15 @@ function runAmbulance(mode) {
     });
     document.getElementById('amb-overlay').style.display = 'none';
 
+    isFetchingAmb = true;
     fetch('/api/ambulance/compare', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
+            isFetchingAmb = false;
             updateAmbulanceChart(data.summary);
-            let startT = performance.now();
+            let startT = null;
             function animate(time) {
+                if (startT === null) startT = time;
                 // ~3x compression: 1 real second = 3.33 sim seconds
                 let elapsedSim = (time - startT) / 300;
                 
@@ -340,6 +345,10 @@ function runAmbulance(mode) {
                 }
             }
             ambAnimId = requestAnimationFrame(animate);
+        })
+        .catch(err => {
+            isFetchingAmb = false;
+            console.error("Ambulance simulation failed", err);
         });
 }
 
