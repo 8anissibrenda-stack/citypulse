@@ -1,4 +1,4 @@
-"""CityPulse Frontend Application Logic."""
+// CityPulse Frontend Application Logic.
 
 // State
 let appState = {
@@ -63,6 +63,12 @@ function handleWSMessage(msg) {
     }
 }
 
+function showError(msg) {
+    console.error(msg);
+    els.ambStatus.textContent = msg;
+    els.ambStatus.style.color = 'var(--color-critical)';
+}
+
 // UI Updaters
 function addAlert(alert) {
     const feed = els.alertFeed;
@@ -74,10 +80,11 @@ function addAlert(alert) {
     let title = "Warning";
     if (alert.event_type === 'critical') title = "CRITICAL ALERT";
     if (alert.event_type === 'near_miss') title = "Near Miss";
+    const demoLabel = alert.is_seed ? '<span class="demo-label">demo data</span>' : '';
     
     item.innerHTML = `
         <div class="alert-header">
-            <span>${title}</span>
+            <span>${title}${demoLabel}</span>
             <span>${time}</span>
         </div>
         <div class="alert-details">
@@ -111,7 +118,18 @@ async function fetchState() {
         data.signals.forEach(updateSignalOnMap);
         
     } catch (e) {
-        console.error("Failed to fetch state", e);
+        showError("Failed to fetch state");
+    }
+}
+
+async function fetchEvents() {
+    try {
+        const res = await fetch('/api/events');
+        const data = await res.json();
+        els.alertFeed.innerHTML = '';
+        data.reverse().forEach(addAlert);
+    } catch (e) {
+        showError("Failed to fetch events");
     }
 }
 
@@ -130,7 +148,7 @@ async function fetchMetrics() {
             updateChart(data.ambulance_comparison);
         }
     } catch (e) {
-        console.error("Failed to fetch metrics", e);
+        showError("Failed to fetch metrics");
     }
 }
 
@@ -141,16 +159,17 @@ async function fetchHotspots() {
         
         els.hotspotsBody.innerHTML = '';
         data.forEach(h => {
+            const demoLabel = h.is_seed ? '<span class="demo-label">demo data</span>' : '';
             els.hotspotsBody.innerHTML += `
                 <tr>
-                    <td>${h.zone_name}</td>
+                    <td>${h.zone_name}${demoLabel}</td>
                     <td>${h.n_events}</td>
                     <td>${h.avg_ttc_s}s</td>
                 </tr>
             `;
         });
     } catch (e) {
-        console.error("Failed to fetch hotspots", e);
+        showError("Failed to fetch hotspots");
     }
 }
 
@@ -196,7 +215,7 @@ async function fetchScenarios() {
             `;
         });
     } catch (e) {
-        console.error("Failed to fetch scenarios", e);
+        showError("Failed to fetch scenarios");
     }
 }
 
@@ -216,7 +235,7 @@ async function fetchConfig() {
             els.valTtcCrit.textContent = cfg.ttc_critical_s;
         }
     } catch (e) {
-        console.error("Failed to fetch config", e);
+        showError("Failed to fetch config");
     }
 }
 
@@ -318,8 +337,10 @@ async function initMap() {
             appState.signalMarkers[s.id] = marker;
         });
         
+        setTimeout(() => appState.map.invalidateSize(), 500);
+        
     } catch (e) {
-        console.error("Failed to init map data", e);
+        showError("Failed to init map data");
     }
 }
 
@@ -549,6 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial fetches
     fetchState();
     fetchMetrics();
+    fetchEvents();
     fetchHotspots();
     fetchScenarios();
     fetchConfig();
@@ -557,5 +579,5 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         fetchMetrics();
         fetchHotspots();
-    }, 5000);
+    }, 3000);
 });

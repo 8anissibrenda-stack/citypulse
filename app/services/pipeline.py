@@ -287,4 +287,5 @@ class PipelineService:
             "vehicle_track_id": alert.vehicle.track_id,
             "zone_name": alert.zone_name,
             "latency_ms": alert.latency_ms,
+            "is_seed": 0,
         }

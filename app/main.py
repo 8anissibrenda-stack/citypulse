@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
@@ -23,6 +23,9 @@ from app.ws import ConnectionManager
 
 logging.basicConfig(level=settings.log_level, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("citypulse")
+
+import mimetypes
+mimetypes.add_type("text/css", ".css")
 
 # ---------------------------------------------------------------------------
 # Setup & Lifespan
@@ -214,7 +217,9 @@ async def websocket_endpoint(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 # Static files
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+import os
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # HTML Pages
 @app.get("/", response_class=HTMLResponse)

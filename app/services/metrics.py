@@ -54,14 +54,14 @@ def get_live_metrics() -> dict[str, Any]:
     comparison = db.query_all("SELECT * FROM v_ambulance_comparison")
 
     return {
-        "total_events": live_counts.get("total", 0),
-        "warnings": live_counts.get("warnings", 0),
-        "criticals": live_counts.get("criticals", 0),
-        "near_misses": live_counts.get("near_misses", 0),
+        "total_events": live_counts.get("total") or 0,
+        "warnings": live_counts.get("warnings") or 0,
+        "criticals": live_counts.get("criticals") or 0,
+        "near_misses": live_counts.get("near_misses") or 0,
         "false_alerts": 0,
-        "mean_latency_ms": latency.get("mean_latency", 0) or 0,
+        "mean_latency_ms": latency.get("mean_latency") or 0,
         "p95_latency_ms": p95 or 0,
-        "seed_events": seed_count.get("n", 0),
+        "seed_events": seed_count.get("n") or 0,
         "ambulance_comparison": comparison,
     }
 

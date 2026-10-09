@@ -25,9 +25,9 @@
 
 body {
   margin: 0;
-  font-family: var(--font-family);
-  background-color: var(--bg-dark);
-  color: var(--text-main);
+  font-family: var(--font-family, 'Inter', sans-serif);
+  background-color: var(--bg-dark, #121212);
+  color: var(--text-main, #ffffff);
   line-height: 1.5;
 }
 
@@ -208,9 +208,9 @@ a {
 
 /* Map */
 #map {
-  height: 300px;
+  height: 360px;
   width: 100%;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-md, 8px);
   z-index: 1;
 }
 
@@ -250,20 +250,20 @@ select, button, input {
 }
 
 select {
-  background-color: var(--bg-dark);
-  color: var(--text-main);
-  border: 1px solid var(--glass-border);
+  background-color: var(--bg-dark, #121212);
+  color: var(--text-main, #ffffff);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
   padding: 0.5rem;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-sm, 4px);
   outline: none;
 }
 
 button {
-  background-color: var(--glass-bg);
-  color: var(--text-main);
-  border: 1px solid var(--glass-border);
+  background-color: var(--glass-bg, rgba(30, 30, 30, 0.7));
+  color: var(--text-main, #ffffff);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
   padding: 0.5rem 1rem;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-sm, 4px);
   cursor: pointer;
   transition: all 0.2s;
 }

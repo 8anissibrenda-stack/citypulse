@@ -195,11 +195,11 @@ CREATE VIEW v_event_summary AS
   FROM events GROUP BY date(ts), event_type;
 
 CREATE VIEW v_hotspots AS
-  SELECT c.name AS camera, e.zone_name, COUNT(*) AS n_events,
+  SELECT c.name AS camera, e.zone_name, e.is_seed, COUNT(*) AS n_events,
          SUM(CASE WHEN e.event_type='near_miss' THEN 1 ELSE 0 END) AS near_misses,
          ROUND(AVG(e.ttc_s),2) AS avg_ttc_s
   FROM events e JOIN cameras c ON c.id = e.camera_id
-  GROUP BY c.name, e.zone_name;
+  GROUP BY c.name, e.zone_name, e.is_seed;
 
 CREATE VIEW v_ambulance_comparison AS
   SELECT mode, COUNT(*) AS runs,

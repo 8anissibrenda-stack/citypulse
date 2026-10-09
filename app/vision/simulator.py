@@ -88,6 +88,9 @@ class JunctionSimulator:
         self._scenario_actors: list[_Actor] | None = None
         self._scenario_duration: float = 0.0
 
+        self._demo_spawned = False
+        self._last_conflict_t = 8.0
+
         # Pre-render the background once
         self._bg = self._render_background()
 
@@ -223,6 +226,30 @@ class JunctionSimulator:
             ))
             self._next_car_t = self._t + self._rng.uniform(3.0, 6.0)
 
+        # Guaranteed conflict at 8s, and every 60s
+        if (not self._demo_spawned and self._t >= 8.0) or (self._t - self._last_conflict_t >= 60.0):
+            self._demo_spawned = True
+            self._last_conflict_t = self._t
+            # Spawn car from left, pedestrian from top on collision course
+            car_x, car_vx = -30, 8.0 * self.ppm
+            car_y = ROAD_Y1 + 40
+            
+            ped_x, ped_vy = CROSSING_X1 + 70, 1.4 * self.ppm
+            ped_y = CROSSING_Y1 - 10
+            
+            self._actors.append(_Actor(
+                track_id=self._alloc_id(), cls="car",
+                x=car_x, y=car_y, vx=car_vx, vy=0, spawn_t=self._t,
+            ))
+            self._actors.append(_Actor(
+                track_id=self._alloc_id(), cls="person",
+                x=ped_x, y=ped_y, vx=0, vy=ped_vy, spawn_t=self._t,
+            ))
+            # Delay normal spawning slightly
+            self._next_car_t = self._t + 4.0
+            self._next_vru_t = self._t + 6.0
+            return
+
         # Pedestrians
         if self._t >= self._next_vru_t:
             speed_mps = self._rng.uniform(1.2, 1.6)
@@ -235,15 +262,6 @@ class JunctionSimulator:
                 vy = -speed_mps * self.ppm
 
             x = self._rng.uniform(CROSSING_X1 + 10, CROSSING_X2 - 10)
-
-            # 1 in 6 intentionally enters when a car is near
-            if self._rng.random() < 1 / 6:
-                # Check for nearby car
-                for a in self._actors:
-                    if CLASS_MAP[a.cls]["category"] == "vehicle":
-                        dist = abs(a.x - x) / self.ppm
-                        if dist < 25:
-                            break  # Intentionally spawn to create conflict
 
             self._actors.append(_Actor(
                 track_id=self._alloc_id(), cls="person",

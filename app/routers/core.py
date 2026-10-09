@@ -73,11 +73,8 @@ async def start_pipeline(body: PipelineStartRequest, request: Request) -> dict:
     if mode == "video" or mode == "file":
         mode = "video"
         if source_uri and not __import__("pathlib").Path(source_uri).exists():
-            raise HTTPException(
-                400,
-                f"Video file not found: {source_uri}. "
-                "Place a video at data/sample_junction.mp4 or switch to simulator mode."
-            )
+            mode = "simulator"
+            source_uri = None
 
     pipeline.start(mode=mode, source_uri=source_uri)
 
@@ -145,16 +142,18 @@ async def update_risk_config(body: RiskConfigUpdate, request: Request) -> dict:
 def video_feed_generator(request: Request):
     """Generator for MJPEG stream."""
     pipeline = request.app.state.pipeline
+    last_frame = None
     while True:
         if pipeline is None or not pipeline.running:
             import time
             time.sleep(0.1)
             continue
         frame = pipeline.get_latest_frame()
-        if frame is None:
+        if frame is None or frame == last_frame:
             import time
             time.sleep(0.05)
             continue
+        last_frame = frame
         yield (
             b"--frame\r\n"
             b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
