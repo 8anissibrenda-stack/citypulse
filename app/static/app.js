@@ -313,8 +313,15 @@ function runAmbulance(mode) {
                 let bTick = Math.min(baseTicks.length > 0 ? baseTicks.length - 1 : 0, tick);
                 let pTick = Math.min(prioTicks.length > 0 ? prioTicks.length - 1 : 0, tick);
                 
-                let baseDone = updateAmbulancePanel('base', baseTicks[bTick], elapsedSim);
-                let prioDone = updateAmbulancePanel('prio', prioTicks[pTick], elapsedSim);
+                let baseDone = true;
+                let prioDone = true;
+                
+                if (mode === 'compare' || mode === 'baseline') {
+                    baseDone = updateAmbulancePanel('base', baseTicks[bTick], elapsedSim);
+                }
+                if (mode === 'compare' || mode === 'priority') {
+                    prioDone = updateAmbulancePanel('prio', prioTicks[pTick], elapsedSim);
+                }
                 
                 if (mode === 'compare' && baseDone && prioDone) {
                     showAmbulanceOverlay(data.summary);
