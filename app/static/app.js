@@ -2,16 +2,21 @@
 let ws = null;
 let currentMode = "simulator";
 let isRunning = false;
+let lastFrameData = null;
+let flashState = false;
+let ambAnimId = null;
+let isFetchingAmb = false;
+let ambChart = null;
 
 // DOM Elements
-const canvas = document.getElementById("scene-canvas");
-const ctx = canvas.getContext("2d");
-const videoFeed = document.getElementById("video-feed");
-const badge = document.getElementById("status-badge");
-const driverDisplay = document.getElementById("driver-display");
-const driverMain = document.getElementById("display-main");
-const driverSub = document.getElementById("display-sub");
-const liveAlerts = document.getElementById("live-alerts");
+let canvas = null;
+let ctx = null;
+let videoFeed = null;
+let badge = null;
+let driverDisplay = null;
+let driverMain = null;
+let driverSub = null;
+let liveAlerts = null;
 
 // Tokens
 // Add sigColor helper
@@ -49,7 +54,6 @@ const CAPTIONS = {
 };
 
 // State
-let lastFrameData = null;
 
 function switchTab(tabId) {
   document
@@ -109,8 +113,7 @@ function replayScenario() {
 
 function connectWebSocket() {
   if (ws) ws.close();
-  const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === "frame") {
@@ -250,15 +253,7 @@ function drawScene(data) {
   }
 }
 
-let flashState = false;
-setInterval(() => {
-  if (
-    driverDisplay.classList.contains("warning") ||
-    driverDisplay.classList.contains("critical")
-  ) {
-    driverDisplay.classList.toggle("flash");
-  }
-}, 166);
+
 
 function updateUI(data) {
   // Driver display
@@ -301,8 +296,7 @@ function updateUI(data) {
 }
 
 // Ambulance Flow
-let ambAnimId = null;
-let isFetchingAmb = false;
+
 
 function runAmbulance(mode) {
   if (isFetchingAmb) return;
@@ -450,7 +444,7 @@ function resetAmbulances() {
   document.getElementById("amb-overlay").style.display = "none";
 }
 
-let ambChart = null;
+
 function updateAmbulanceChart(summary) {
   if (!summary || !document.getElementById("ambChart")) return;
   const ctx = document.getElementById("ambChart").getContext("2d");
@@ -547,14 +541,38 @@ function runScenarios() {
     .then((data) => renderScenarios(data.results));
 }
 
-// Risk Settings
-document.getElementById("set-ttc-warn")?.addEventListener("input", (e) => {
-  document.getElementById("val-ttc-warn").textContent = parseFloat(
-    e.target.value,
-  ).toFixed(1);
-});
-document.getElementById("set-ttc-crit")?.addEventListener("input", (e) => {
-  document.getElementById("val-ttc-crit").textContent = parseFloat(
-    e.target.value,
-  ).toFixed(1);
+document.addEventListener("DOMContentLoaded", () => {
+  canvas = document.getElementById("scene-canvas");
+  if (canvas) ctx = canvas.getContext("2d");
+  videoFeed = document.getElementById("video-feed");
+  badge = document.getElementById("status-badge");
+  driverDisplay = document.getElementById("driver-display");
+  driverMain = document.getElementById("display-main");
+  driverSub = document.getElementById("display-sub");
+  liveAlerts = document.getElementById("live-alerts");
+
+  setInterval(() => {
+    if (
+      driverDisplay && 
+      (driverDisplay.classList.contains("warning") ||
+      driverDisplay.classList.contains("critical"))
+    ) {
+      driverDisplay.classList.toggle("flash");
+    }
+  }, 166);
+
+  document.getElementById("set-ttc-warn")?.addEventListener("input", (e) => {
+    document.getElementById("val-ttc-warn").textContent = parseFloat(
+      e.target.value,
+    ).toFixed(1);
+  });
+  document.getElementById("set-ttc-crit")?.addEventListener("input", (e) => {
+    document.getElementById("val-ttc-crit").textContent = parseFloat(
+      e.target.value,
+    ).toFixed(1);
+  });
+  
+  // start-up code
+  connectWebSocket();
+  startPipeline();
 });
